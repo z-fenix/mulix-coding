@@ -179,3 +179,20 @@ go test ./...
 ```
 
 Module: `github.com/mulix-dev/mulix-coding`, Go 1.27.
+
+## Build, install, release
+
+Shell scripts under `scripts/` — no CI or external tooling required, only
+`git` and a Go toolchain.
+
+```
+./scripts/build.sh            # build bin/mulix natively, version stamped
+                              # from MULIX_VERSION, git describe, or "dev"
+./scripts/build.sh test       # build + go vet + go test
+./scripts/install.sh          # clone the repo, compile locally, install to
+                              # ~/.local/bin (--version, --prefix, --source)
+./scripts/release.sh          # cross-compile linux/darwin/windows x
+                              # x86_64/arm64 into dist/ + sha256 checksums
+./scripts/release.sh --dry-run
+```
+
