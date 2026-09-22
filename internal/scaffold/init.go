@@ -58,7 +58,9 @@ func Init(opts InitOptions) (InitResult, error) {
 
 // writeIfAbsentOrForced writes content() to root/relPath unless the file
 // already exists and Force is false, in which case it's recorded as
-// skipped instead of silently left alone with no report at all.
+// skipped instead of silently left alone with no report at all. Every
+// file mulix writes also gets a baseline copy under .mulix/.installed/ —
+// the common ancestor `mulix update` later three-way merges against.
 func writeIfAbsentOrForced(res *InitResult, opts InitOptions, relPath string, content func() ([]byte, error)) error {
 	full := filepath.Join(opts.Root, relPath)
 	if _, err := os.Stat(full); err == nil && !opts.Force {
@@ -74,6 +76,13 @@ func writeIfAbsentOrForced(res *InitResult, opts InitOptions, relPath string, co
 	}
 	if err := os.WriteFile(full, data, 0o644); err != nil {
 		return fmt.Errorf("scaffold: writing %s: %w", relPath, err)
+	}
+	baseFull := baselinePath(opts.Root, relPath)
+	if err := os.MkdirAll(filepath.Dir(baseFull), 0o755); err != nil {
+		return fmt.Errorf("scaffold: creating baseline dir for %s: %w", relPath, err)
+	}
+	if err := os.WriteFile(baseFull, data, 0o644); err != nil {
+		return fmt.Errorf("scaffold: writing baseline for %s: %w", relPath, err)
 	}
 	res.Written = append(res.Written, relPath)
 	return nil
