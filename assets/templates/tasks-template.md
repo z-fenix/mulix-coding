@@ -20,7 +20,11 @@ invent phases that don't apply.
      guard counts unchecked checkbox markers in this file literally, so
      keep this the single, exact-syntax checklist — no nested bullet
      variations, and avoid writing that exact marker syntax in prose
-     anywhere in this file (as this comment is careful to do). -->
+     anywhere in this file (as this comment is careful to do).
+     When the build phase completes a task it appends a "- tests: <test
+     reference>" line directly beneath the checked task (or marks the
+     task line "[no-test]" for tasks with no test, e.g. docs/config) —
+     the guard rejects a checked task without that evidence. -->
 
 ## Format: `[ID] [P?] [Story] Description`
 

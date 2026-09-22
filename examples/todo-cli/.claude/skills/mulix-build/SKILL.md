@@ -59,7 +59,20 @@ unrelated work.
 
 ## Part 2 — Writing each task's code
 
-### The iron law
+### Load the TDD skill before writing anything
+
+Before the first task's red step, invoke the
+`superpowers:test-driven-development` skill and follow it exactly for
+every task in this phase. That skill is the authoritative statement of
+the discipline — where anything in this section disagrees with it, the
+skill wins. If the phase spans a long session and your context has been
+compacted, re-invoke it before continuing.
+
+If that skill is not installed in this environment, hold yourself to the
+inline version below instead — it is a faithful fallback, not an excuse
+to skip TDD.
+
+### The iron law (fallback summary)
 
 **No production code without a failing test first.** If you catch
 yourself having written implementation code before a test exists for it,
@@ -86,6 +99,10 @@ test would have caught the bug it's meant to catch.
 
 ### Before marking a task done, check all of:
 
+This list mirrors the verification checklist in
+`superpowers:test-driven-development` — run it after the skill's own
+checklist, not instead of it.
+
 - [ ] Every new function/behavior has a test
 - [ ] You watched each test fail before making it pass
 - [ ] Each failure was for the right reason, not a typo or setup bug
@@ -93,6 +110,10 @@ test would have caught the bug it's meant to catch.
 - [ ] All tests pass, including previously-passing ones
 - [ ] Test output is clean (no warnings, no skipped assertions)
 - [ ] Tests exercise real behavior, not mocked-out behavior standing in for it
+- [ ] The task's checkbox in tasks.md is checked *and* an evidence line
+      `- tests: <test reference>` was added directly beneath it — or the
+      task line was marked `[no-test]` if it legitimately has no test
+      (docs, config, scaffolding)
 
 Can't check all of these? You skipped TDD for that task. Go back and do
 it properly rather than checking the box anyway — the verify phase's
@@ -120,5 +141,10 @@ Only once every checkbox in tasks.md is checked:
 mulix state transition build-complete
 ```
 
-The guard counts unchecked boxes in tasks.md; it does not verify TDD
-discipline was followed — that's what this skill's checklist is for.
+The guard counts unchecked boxes in tasks.md *and* checks the TDD
+evidence trail: every checked task needs a `- tests: <test reference>`
+line directly beneath it, or a `[no-test]` marker on the task line. The
+guard verifies the evidence trail was left, not that the red-green cycle
+was honestly run — that part is still on you via the TDD skill and the
+checklist above. Evidence added without a test that actually failed
+first defeats the whole point; don't fabricate it.

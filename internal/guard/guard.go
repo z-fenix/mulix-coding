@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/mulix-dev/mulix-coding/internal/flow"
@@ -64,7 +65,7 @@ var checksByEvent = map[flow.Event][]checkFunc{
 	flow.EventTasksComplete:   {checkArtifactPresent("tasks-artifact-present", func(s flow.State) string { return s.TasksPath })},
 	flow.EventAnalyzeComplete: {checkArtifactPresent("analyze-report-present", func(s flow.State) string { return s.AnalyzePath })},
 	flow.EventAnalyzeSkipped:  {checkAnalyzeSkipAcknowledged},
-	flow.EventBuildComplete:   {checkTasksAllChecked},
+	flow.EventBuildComplete:   {checkTasksAllChecked, checkTddEvidencePresent},
 	flow.EventVerifyPass:      {checkArtifactPresent("verification-report-present", func(s flow.State) string { return s.ReportPath }), checkVerifyResultPass},
 	flow.EventVerifyFail:      {checkVerifyResultFail},
 	flow.EventArchived:        {checkArchiveConfirmed},
@@ -190,6 +191,94 @@ func countUncheckedTaskLines(data string) int {
 		}
 	}
 	return count
+}
+
+// checkTddEvidencePresent verifies that every checked task in tasks.md
+// carries test-first evidence: either a "- tests: <reference>" line
+// directly beneath the task (blank lines in between are fine), or a
+// "[no-test]" marker on the task line itself for tasks that legitimately
+// have no test (docs, config, scaffolding). This is the structural half
+// of the build phase's TDD discipline — the mulix-build skill drives the
+// red-green-refactor cycle, and this check makes sure the discipline left
+// a trace in tasks.md before the change can advance to verify.
+func checkTddEvidencePresent(root string, s flow.State) Result {
+	const name = "tdd-evidence-present"
+	if s.TasksPath == "" {
+		return Result{Name: name, Pass: false, Next: "No tasks path recorded in state."}
+	}
+	full := s.TasksPath
+	if !filepath.IsAbs(full) {
+		full = filepath.Join(root, full)
+	}
+	data, err := os.ReadFile(full)
+	if err != nil {
+		return Result{Name: name, Pass: false, Next: fmt.Sprintf("Could not read %s: %v", s.TasksPath, err)}
+	}
+
+	var (
+		missing   []string // task IDs (or line text) lacking evidence
+		pendingID string   // task awaiting its evidence line, "" if none
+		sawLine   bool     // whether a non-blank line followed the pending task yet
+	)
+	for line := range strings.SplitSeq(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(trimmed, "- [x]"):
+			// A new task line closes out any still-pending task.
+			if pendingID != "" {
+				missing = append(missing, pendingID)
+			}
+			pendingID = ""
+			if strings.Contains(trimmed, "[no-test]") {
+				continue
+			}
+			pendingID = taskIDOf(trimmed)
+			sawLine = false
+		case strings.HasPrefix(trimmed, "- [ ]"):
+			if pendingID != "" {
+				missing = append(missing, pendingID)
+			}
+			pendingID = ""
+		case pendingID != "" && !sawLine && strings.HasPrefix(trimmed, "- tests:") &&
+			strings.TrimSpace(strings.TrimPrefix(trimmed, "- tests:")) != "":
+			pendingID = ""
+		default:
+			if pendingID != "" {
+				sawLine = true
+			}
+		}
+	}
+	if pendingID != "" {
+		missing = append(missing, pendingID)
+	}
+	if len(missing) > 0 {
+		return Result{
+			Name: name,
+			Pass: false,
+			Next: fmt.Sprintf("%s has %d checked task(s) without test evidence, e.g. %q. Add a \"- tests: <test reference>\" line under each checked task, or mark it [no-test] if it legitimately has no test.", s.TasksPath, len(missing), missing[0]),
+		}
+	}
+	return Result{Name: name, Pass: true}
+}
+
+// taskIDOf extracts the leading task ID (T001, T042, ...) from a task
+// line's description, falling back to the whole line when no ID matches —
+// tasks are required to carry IDs, but the hint should still be useful if
+// one doesn't.
+func taskIDOf(trimmedTaskLine string) string {
+	fields := strings.Fields(strings.TrimPrefix(trimmedTaskLine, "- [x]"))
+	if len(fields) > 0 && (strings.HasPrefix(fields[0], "T") || strings.HasPrefix(fields[0], "t")) {
+		if _, err := strconv.Atoi(strings.TrimPrefix(fields[0], "T")); err == nil {
+			return fields[0]
+		}
+		if _, err := strconv.Atoi(strings.TrimPrefix(fields[0], "t")); err == nil {
+			return fields[0]
+		}
+	}
+	return trimmedTaskLine
 }
 
 func checkVerifyResultPass(_ string, s flow.State) Result {

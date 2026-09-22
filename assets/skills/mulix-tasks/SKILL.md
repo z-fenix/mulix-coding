@@ -30,6 +30,12 @@ Every task MUST follow this exact form:
 - **Description**: a clear action with an exact file path — vague
   enough that "an LLM can't complete it without additional context" is a
   failing task, not a passing one.
+- **Test evidence (added later, by build)**: when the build phase
+  completes a task it appends `- tests: <test reference>` directly
+  beneath the task line, or marks the task line `[no-test]` for tasks
+  that legitimately have no test. Keep each task a single line so that
+  evidence stays unambiguous — the build-complete guard rejects a
+  checked task whose next non-blank line isn't its evidence line.
 
 ## Phase structure
 
