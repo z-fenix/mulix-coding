@@ -1,4 +1,4 @@
-// Package models defines the Task type shared by the todo-cli commands.
+// Package models holds the todo-cli data model.
 package models
 
 import (
@@ -6,52 +6,74 @@ import (
 	"time"
 )
 
-// Task is a single to-do item.
+// Priority levels a task can carry, from least to most urgent.
+const (
+	PriorityLow    = "low"
+	PriorityMedium = "medium"
+	PriorityHigh   = "high"
+)
+
+// Task is a single to-do item as stored on disk.
 type Task struct {
-	ID          string    `json:"id"`
+	ID          int       `json:"id"`
 	Description string    `json:"description"`
-	Done        bool      `json:"done"`
 	CreatedAt   time.Time `json:"created_at"`
-
-	// Priority is one of "low", "medium", "high". Empty string (including
-	// tasks stored before this field existed) means "use the default";
-	// callers should read PriorityOrDefault() rather than this field
-	// directly whenever the resolved value matters (sorting, display).
-	Priority string `json:"priority,omitempty"`
+	Done        bool      `json:"done"`
+	Priority    string    `json:"priority,omitempty"`
 }
 
-// DefaultPriority is used whenever a task has no explicit priority set,
-// including tasks stored on disk before the priority field existed.
-const DefaultPriority = "medium"
-
-// ValidPriorities are the only priority values todo-cli accepts.
-var ValidPriorities = []string{"low", "medium", "high"}
-
-// PriorityOrDefault returns t.Priority, or DefaultPriority if it's empty.
-// This is the single place the "missing priority means medium" rule is
-// applied; callers that care about the resolved priority (sorting,
-// display) should use this instead of reading Priority directly.
-func (t Task) PriorityOrDefault() string {
-	if t.Priority == "" {
-		return DefaultPriority
+// NextID returns the ID a newly created task should get: one past the
+// highest existing ID, or 1 for an empty list.
+func NextID(tasks []Task) int {
+	max := 0
+	for _, t := range tasks {
+		if t.ID > max {
+			max = t.ID
+		}
 	}
-	return t.Priority
+	return max + 1
 }
 
-// priorityRank orders priorities from most to least urgent, for sorting.
-var priorityRank = map[string]int{"high": 3, "medium": 2, "low": 1}
+// PriorityOrDefault resolves the task's priority to one of the three
+// levels, mapping an empty value (tasks stored before this feature
+// existed, or a task constructed without one) to medium. All ordering
+// and display paths go through this instead of reading Priority
+// directly, so the default is applied in exactly one place.
+func (t Task) PriorityOrDefault() string {
+	switch t.Priority {
+	case PriorityLow, PriorityMedium, PriorityHigh:
+		return t.Priority
+	default:
+		return PriorityMedium
+	}
+}
 
-// SortByPriority sorts tasks high -> medium -> low, breaking ties within
-// the same priority by creation order (oldest first). It sorts in place
-// and is stable, so equal-priority tasks retain their relative order
-// when they also share a creation time.
+// priorityRank maps a priority level to a sort weight; higher ranks
+// sort earlier.
+func priorityRank(level string) int {
+	switch level {
+	case PriorityHigh:
+		return 3
+	case PriorityMedium:
+		return 2
+	default:
+		return 1
+	}
+}
+
+// SortByPriority orders tasks high → medium → low in place, breaking
+// ties within the same priority by creation order, oldest first
+// (FR-006). The explicit created-at comparison makes the contract
+// self-contained: the result is correct regardless of the input
+// slice's order, not just when the caller happens to pass tasks in
+// creation order.
 func SortByPriority(tasks []Task) {
 	sort.SliceStable(tasks, func(i, j int) bool {
-		a, b := tasks[i], tasks[j]
-		ra, rb := priorityRank[a.PriorityOrDefault()], priorityRank[b.PriorityOrDefault()]
-		if ra != rb {
-			return ra > rb
+		ri := priorityRank(tasks[i].PriorityOrDefault())
+		rj := priorityRank(tasks[j].PriorityOrDefault())
+		if ri != rj {
+			return ri > rj
 		}
-		return a.CreatedAt.Before(b.CreatedAt)
+		return tasks[i].CreatedAt.Before(tasks[j].CreatedAt)
 	})
 }

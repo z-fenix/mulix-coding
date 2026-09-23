@@ -12,7 +12,7 @@ there's no terminology drift (all three documents use the same
 framing).
 
 | ID | Category | Severity | Location(s) | Summary | Recommendation |
-|----|----------|----------|--------------|---------|-----------------|
+|----|----------|----------|--------------|---------|----------------|
 | — | — | — | — | No findings | — |
 
 ## Coverage Summary
@@ -20,13 +20,13 @@ framing).
 | Requirement | Has Task? | Task IDs | Notes |
 |-------------|-----------|----------|-------|
 | FR-001 (three levels) | Yes | T002 | Field type/values |
-| FR-002 (--priority flag) | Yes | T006 | |
+| FR-002 (--priority flag, any position) | Yes | T005, T006 | Position-independence covered explicitly in T005 |
 | FR-003 (default medium) | Yes | T002, T006 | Default lives in `PriorityOrDefault`, exercised via `add` |
-| FR-004 (reject invalid) | Yes | T006 | |
+| FR-004 (reject invalid) | Yes | T005, T006 | |
 | FR-005 (sort order) | Yes | T008 | |
 | FR-006 (tie-break oldest-first) | Yes | T001, T008 | Covered by the stable-sort test in T001 and the list-level test in T007 |
 | FR-007 (set-priority command) | Yes | T010 | |
-| FR-008 (not-found error) | Yes | T010 | |
+| FR-008 (not-found error) | Yes | T009, T010 | |
 | FR-009 (backward compat, missing field) | Yes | T002, T003, T004 | |
 
 **Constitution alignment issues**: none (no constitution.md exists for

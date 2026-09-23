@@ -2,30 +2,49 @@ package cli
 
 import (
 	"fmt"
-	"slices"
+	"os"
+	"strconv"
 
 	"example.com/todo-cli/src/models"
 	"example.com/todo-cli/src/services"
 )
 
-// SetPriority updates the priority of the task with the given id.
-// Returns an error and leaves the store unmodified if id doesn't match
-// any task, or if priority isn't one of models.ValidPriorities.
-func SetPriority(store *services.Store, id, priority string) error {
-	if !slices.Contains(models.ValidPriorities, priority) {
-		return fmt.Errorf("invalid priority %q: must be one of %v", priority, models.ValidPriorities)
+// runSetPriority implements `todo set-priority <id> <level>`: updates an
+// existing task's priority, exiting non-zero with "task not found" for
+// an unknown id and leaving the store unmodified in that case.
+func runSetPriority(args []string) int {
+	if len(args) != 2 {
+		fmt.Fprintln(os.Stderr, "usage: todo set-priority <id> <low|medium|high>")
+		return 2
 	}
-
-	tasks, err := store.Load()
+	id, err := strconv.Atoi(args[0])
 	if err != nil {
-		return err
+		fmt.Fprintf(os.Stderr, "todo: invalid task id %q\n", args[0])
+		return 2
+	}
+	level := args[1]
+	if !validPriorities[level] {
+		fmt.Fprintf(os.Stderr, "todo: invalid priority %q (want %s, %s or %s)\n", level, models.PriorityLow, models.PriorityMedium, models.PriorityHigh)
+		return 2
 	}
 
-	for i, task := range tasks {
-		if task.ID == id {
-			tasks[i].Priority = priority
-			return store.Save(tasks)
+	path := storePath()
+	tasks, err := services.Load(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "todo: %v\n", err)
+		return 1
+	}
+	for i, t := range tasks {
+		if t.ID == id {
+			tasks[i].Priority = level
+			if err := services.Save(path, tasks); err != nil {
+				fmt.Fprintf(os.Stderr, "todo: %v\n", err)
+				return 1
+			}
+			fmt.Printf("task %d priority set to %s\n", id, level)
+			return 0
 		}
 	}
-	return fmt.Errorf("task not found: %q", id)
+	fmt.Fprintf(os.Stderr, "todo: task not found: %d\n", id)
+	return 1
 }

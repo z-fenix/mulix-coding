@@ -281,3 +281,90 @@ docs/changes/<NNN-slug>/
 - [x] 手动验证:在 `examples/todo-cli` 里移除历史遗留的 `.mulix/active`(该 change 早已 `archived: true` 但 active 标记未清除,是本次修复动机的真实复现),确认 `mulix state show`(不带 `--change`)之后正确报错提示"no active change set",带 `--change` 显式指定仍正常工作。
 
 未做:没有重新生成 `examples/todo-cli` 里已完成的历史产物文件（`specs/001-...` 目录及其内容）来匹配新目录结构——旧例子是在旧目录约定下跑完的，视为该次运行的历史记录，不做迁移；后续如果需要在新目录约定下重新验证完整流程，需要重新跑一遍 example（本 Phase 未包含在范围内，用户未提出该要求）。
+
+## Phase 10 — build 阶段委派给 superpowers 派发链,init 检测插件,产物落 .runtime/sdd(已完成)
+
+用户提出三个关联需求:1) build 阶段应该把执行权交给 superpowers 的 `writing-plans` → `subagent-driven-development`/`executing-plans` → `test-driven-development` 技能链,而不是 mulix 自己承担代码生成逻辑;2) `mulix init` 应检测 superpowers 插件是否已安装,未安装则提示(非阻塞);3) superpowers 派发/审查过程中产生的计划、任务分解、审查记录等中间产物应落到 `docs/changes/<change>/.runtime` 下,而不是散落在别处。
+
+用户确认的范围边界(三轮 `AskUserQuestion`):需求 1 的落地范围是"技能层 + guard 也感知委派模式"(而不只是技能文字);需求 2 的检测方式是"检测 `.claude/plugins` 或已知安装路径,未装则打印提示文字";需求 3 的"SDD 产物"specifically 指派发/审查过程中的计划、任务分解、审查记录等中间产物。
+
+### 改动范围
+
+**`internal/flow`**:`state.go` 新增 `DelegatedToSubagents bool` 字段(`yaml:"delegated_to_subagents,omitempty"`)。纯信息性字段——没有任何 guard 检查项直接依赖它做门禁判断,因为委派与否本身没有独立于"任务是否留下测试证据"之外的、guard 能核实的文件系统证据;它存在的意义是让 guard 的失败提示文案能感知到委派模式(见下)。
+
+**`internal/cliutil`**:`state_cmd.go` 的 `setField` 增加 `delegated_to_subagents` 分支,`newStateSetFieldCmd` 的字段允许列表和 `newStateShowCmd` 的打印同步更新。
+
+**`internal/guard`**:`checkTddEvidencePresent` 的失败提示(`Next`)在 `s.DelegatedToSubagents` 为真时追加一句——委派给子代理不能免除测试证据要求,派发出去的子代理同样要留下 `- tests:` 行。检查逻辑本身不变(委派与否不改变"每个勾选任务必须有证据行"这条规则),只是失败时的提示文案更精确。
+
+**`internal/hook`**:`.runtime/` 整体在所有阶段都禁止直写的规则保留,但新增一个例外——`.runtime/sdd/`(`scaffold.RuntimeSddDirName`)在 build 阶段可写,供委派链落地它自己的计划/任务分解/审查记录等过程产物。`state.yaml` 本身在任何阶段(包括 build)仍然不可直写;`.runtime/sdd/` 在 build 阶段之外的其他阶段同样不可写。`runtimeDirName`/`runtimeSddDirName` 改为直接引用 `internal/scaffold` 的对应常量(而不是各自重复定义字符串),避免两处约定漂移——这与 Phase 9 里 `internal/state` 因为避免循环 import 而不得不重复定义常量是不同的情况:`hook`→`scaffold` 没有反向依赖,不存在循环 import 问题。
+
+**`internal/scaffold`**:
+- `newchange.go`:`RuntimeDirName` 旁新增 `RuntimeSddDirName = "sdd"` 常量及其用途说明。
+- 新增 `superpowers.go`:`DetectSuperpowers(root) (found bool, detail string)`,先查项目级 `<root>/.claude/plugins/<marketplace>/superpowers/` 目录,再查用户级 `~/.claude/plugins/installed_plugins.json`(解析 `plugins` 字段,匹配任意 `superpowers@` 前缀的 key)。全程 best-effort——任何读取/解析失败都当作"未检测到"处理,绝不让这个检测中断 `mulix init` 本身。新增 `superpowers_test.go`,通过 `t.Setenv("HOME"/"USERPROFILE", ...)` 注入临时 home 目录覆盖 `os.UserHomeDir()`,覆盖:两处都未安装、仅用户级安装、`installed_plugins.json` 只有其他插件、该文件格式错误(视为未安装而非报错)、仅项目级安装、项目级命中时不受用户级缺失影响。
+
+**`internal/cliutil`**:`init_cmd.go` 的 `RunE` 在 `scaffold.Init` 成功后调用 `scaffold.DetectSuperpowers(dir)`,未检测到时打印一行非阻塞提示。新增 `init_cmd_test.go` 覆盖"未检测到时打印提示"和"检测到时不打印提示"两种场景。
+
+**命名限制的一次例外确认**:`assets/skills/**/SKILL.md` 正文和 Go 代码注释禁止出现来源项目名的既有约定(见 Phase 8)本次经用户确认后,在 `internal/scaffold/superpowers.go`(及其测试)里不适用——该文件的全部职责就是匹配磁盘上一个字面量为 `superpowers@<marketplace>` 的插件 key,注释和标识符如果为了规避这个词而改写,只会让代码更难懂,却没有实际收益。`assets/skills/mulix-build/SKILL.md` 正文本身仍然遵守既有约定,新增的委派链说明用"一个提供 `writing-plans`/`subagent-driven-development`/`test-driven-development` 技能链的插件"等描述性说法,不点名。`README.md`/`docs/PLAN.md`(本节)属于面向维护者的内部文档,继续允许点名。
+
+**技能层**(`assets/skills/mulix-build/SKILL.md`,同步到 `examples/todo-cli/.claude/skills/mulix-build/SKILL.md`):Part 2 重新组织为"优先委派给派发链"(五步:用 `writing-plans` 整理计划、通过 `subagent-driven-development`/`executing-plans` 派发且每个子代理自行加载 `test-driven-development`、要求双阶段审查、记录 `delegated_to_subagents true`、产物落 `.runtime/sdd/`)在前,原有的逐字嵌入 TDD 技能作为"插件未安装或直接执行单个任务时"的后备路径,不改动嵌入正文本身。"Delegating exploration" 一节补充一句区分:那是更小粒度的单任务内探索委派,与 Part 2 的整链派发是两件不同粒度的事,两者独立于对方是否启用。"Advancing out of this phase" 一节补充委派不免除证据行的说明。
+
+**文档层**(README.md,保留来源归属不变):Install 一节补充"`mulix init` 检测 superpowers 插件,未检测到时打印提示"的说明;Templates 一节 `mulix-build` 的描述补充委派链机制、`delegated_to_subagents` 字段用途、`.runtime/sdd/` 产物落点。
+
+### 验证
+
+- [x] `go build ./...`、`go vet ./...`、`gofmt -l .`、`go test ./... -count=1` 全绿。
+- [x] `internal/hook` 新增三个测试覆盖 `.runtime/sdd/` 的例外:build 阶段可写、`state.yaml` 在 build 阶段仍不可写、非 build 阶段 `.runtime/sdd/` 仍不可写;既有的 `TestDecide_StateFileNeverDirectlyWritable` 保持通过,确认例外范围没有波及 state.yaml。
+- [x] `grep -n "superpowers\|spec-kit\|comet\|caveman" assets/skills/mulix-build/SKILL.md` 确认新增文字里没有点名来源项目(既有的"逐字嵌入"标记行是改动前就存在的内容,不在本次改动范围内)。
+
+未做:没有触碰 `mulix-brainstorm`/子代理调度/Git worktree 管理等 mulix 自身还不存在的基础设施——委派链的实际执行由目标环境里的插件技能自己负责,mulix 这一侧只做"技能层引导 + guard 感知 + 目录放行 + 安装检测"四件事,范围经用户确认(三轮 `AskUserQuestion`)。
+
+> **注**:本阶段的证据约定(证据行写进 tasks.md)在 Phase 11 被修订为 task brief 文件,又在 Phase 12 被修订为带勾选检测的 task report,见该两节。
+
+## Phase 11 — 证据下沉:tasks.md 只描述任务,执行记录落 .runtime/sdd/ task briefs(已完成)
+
+用户在 todo-cli 全流程重跑验证(build 流程)后调整约定:tasks.md 只描述任务本身(勾选框 + 单行描述),任务的执行过程整体放在 `.runtime/sdd/` 下——包含委派链的全量产物,其中 RED-GREEN-REFACTOR 循环逐任务记录在 `task_<ID>_brief.md` 里。
+
+### 改动范围
+
+**`internal/guard`**(TDD:先改测试确认 RED,再实现转 GREEN):
+- `checkTddEvidencePresent` 的检查对象从"tasks.md 里紧随勾选任务的 `- tests:` 行"改为"`<tasks 所在目录>/.runtime/sdd/task_<ID>_brief.md` 文件"——每个非 `[no-test]` 的勾选任务必须有对应 brief 文件,且文件非空、内含至少一行 `- tests:` 测试引用。原先的 pendingID/下一非空行关联状态机整体删除(证据不再写进 tasks.md,关联规则自然消失),改为逐任务 ID 定位 brief 文件。
+- 失败提示改为指出缺失的 brief 路径;委派不免除提示保留(派发出去的子代理同样要留下 brief)。taskIDOf 回退为整行的任务(无 T 编号)按缺失处理并提示补 ID。
+- brief 文件名取任务 ID 原文(`task_T001_brief.md`);sdd 目录由 `TasksPath` 所在目录推导(`.runtime/sdd/`),不新增 state 字段;`.runtime`/`sdd` 常量改为引用 `internal/scaffold` 的 `RuntimeDirName`/`RuntimeSddDirName`(guard→scaffold 无循环依赖)。
+- 测试同步:证据行关联测试删除(语义消失),新增 brief 缺失/空文件/无 `- tests:` 引用三个失败路径测试;`[no-test]` 豁免、未勾选任务不要求 brief、prose 含 `- [ ]` 不误判三个既有测试保留并适配。
+
+**技能/模板层**:
+- `assets/skills/mulix-build/SKILL.md`:Part 2 第 4/5 步与"Test evidence in tasks.md"一节重写为"Task briefs in .runtime/sdd/"——列出 sdd 全量产物清单(`dispatch.md` 派发计划、每任务一个 `task_<ID>_brief.md`、`review.md` 审查记录),给出 brief 的 RED/GREEN/REFACTOR 结构示例,结尾 `- tests:` 行是 guard 检查的证据;"Advancing out of this phase" 同步。
+- `assets/skills/mulix-tasks/SKILL.md`、`assets/templates/tasks-template.md`:tasks.md 格式说明改为"只描述任务,单行一个任务;执行记录由 build 阶段写进 `.runtime/sdd/task_<ID>_brief.md`,不回写本文件"。
+
+**example 重跑**(`examples/todo-cli`,全流程再次走完):tasks.md 改为纯任务清单(证据行移除);`.runtime/sdd/` 下写入本次运行真实的 11 份 `task_T001..T011_brief.md`(含 T008 的 fix-loop:稳定性平局决依赖输入顺序,被测试抓到后改为显式 `CreatedAt` 比较;T010 的两处测试侧修正);dispatch.md/review.md/state 保留;README/report 的证据约定描述同步。
+
+### 验证
+
+- [x] `go build ./...`、`go vet ./...`、`gofmt -l .`、`go test ./... -count=1` 全绿。
+- [x] todo-cli 全套测试通过;`.runtime/sdd/` 落盘 13 个文件(11 brief + dispatch + review),无杂散目录。
+
+> **注**:本阶段的 brief 文件在 Phase 12 被拆分为 brief(需求)+ report(执行记录),证据检查随之迁移到 report 的勾选检测,见该节。
+
+## Phase 12 — SDD 产物对齐 superpowers 全集 + report 勾选检测(已完成)
+
+用户核对 superpowers 插件源码(sdd-workspace/task-brief/review-package 三脚本与 SKILL.md)后指出 mulix 的 `.runtime/sdd/` 产物集不全,经确认范围(全量对齐,含 diff 审查包;归档后保留)与 report 格式后落地。
+
+### 约定(经用户确认)
+
+- **产物全集**(每 change 一份,归档后保留,不随收尾删除):`progress.md`(台账:首行身份标识,每任务一行状态/fix 轮/Ruling)、`task_<ID>_brief.md`(需求书,派发前由控制器写,只含需求)、`task_<ID>_report.md`(执行记录)、`review-<base>..<head>.diff`(审查包:commit 列表+stat+diff,按区间命名,fix 后 re-review 生成新文件)、`review.md`(双阶段审查结论)、`dispatch.md`(派发计划,mulix 自有)。
+- **report 格式**(用户指定):report 内以 `### Task` 为标题、每条 checkbox 必须且只能是一个 TDD 阶段:`- [ ] RED: 编写失败测试`、`- [ ] GREEN: 最小实现(引用对应的 RED 任务)`、`- [ ] REFACTOR: 重构清理(可选)`。规则:RED 与 GREEN 禁止合并为一条;GREEN 必须引用其 RED;严格交替 RED → GREEN →(可选 REFACTOR)。只写测试的任务的 report 合法地只勾选 RED。
+- **guard 检测勾选**(用户指定):`tdd-evidence-present` 改为对每个勾选任务检查 `task_<ID>_report.md` 存在、非空、至少一条 `- [x] RED:`/`- [x] GREEN:`,且不得存在未勾选的 `- [ ] RED:`/`- [ ] GREEN:`(REFACTOR 可选,不检)。**`[no-test]` 豁免按用户指示移除**——每个勾选任务都要有 report。`- tests:` 行要求同步移除(由 RED/GREEN 勾选结构取代)。
+- tasks.md 与任务模板的格式不动(用户明确纠正:格式约束的是 report,不是任务清单);仅修正模板注释中已失真的证据位置描述。
+
+### 改动范围
+
+**`internal/guard`**(TDD):测试重写——writeReport helper 产出 checkbox 格式;新增"只勾 RED 也通过"、"未勾选 GREEN 失败"、"无任何勾选框失败"三路径;[no-test] 豁免测试删除。实现:`phaseTickProblem` 扫描 report 的 RED/GREEN 勾选态;主检查去掉 [no-test] skip 与 `- tests:` Contains;提示语改为"缺失或存在未勾选 RED/GREEN"。hint 仍含委派不免除句。
+
+**技能/模板层**:`mulix-build/SKILL.md`——产物清单扩为全集(progress.md/brief/report/review-*.diff/review.md/dispatch.md,注明归档后保留),report 格式说明与示例改为 `### Task` 勾选清单,"Advancing out of this phase" 与委派说明同步,移除 [no-test]/`- tests:` 表述;`mulix-tasks/SKILL.md` 与 `tasks-template.md`——仅更新证据位置描述并移除 [no-test] 句,任务格式不变。
+
+**example 重放**(`examples/todo-cli`):11 份 brief 重写为纯需求;新增 11 份 report(checkbox 格式,真实执行史,含 T008 fix 轮与 T010 测试侧修正);新增 `progress.md` 台账(真实 fix 轮 + Ruling);新增 `review-T008-fix1.diff`(由 fix 前后真实代码版本生成的 diff);dispatch.md 增产物索引;README/report 的约定描述同步。
+
+### 验证
+
+- [x] `go build ./...`、`go vet ./...`、`gofmt -l .`、`go test ./... -count=1` 全绿。
+- [x] 端到端:重建二进制,临时项目实测——勾选任务无 report 时 build-complete 拒绝(提示 report 路径与勾选要求);写入含勾选 RED/GREEN 的 report 后通过。

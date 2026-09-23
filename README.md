@@ -73,6 +73,14 @@ actual change to hold. Re-running `mulix init` is safe (it skips files
 that already exist); pass `--force` to overwrite mulix-owned files after
 an upgrade.
 
+If the [superpowers](https://github.com/obra/superpowers) plugin isn't
+detected (project-scope `.claude/plugins/`, or the user-scope
+`~/.claude/plugins/installed_plugins.json` entry Claude Code's plugin
+installer writes), `mulix init` prints a one-line, non-blocking hint
+about it — the build phase can use its skill chain to delegate task
+execution to a reviewed subagent chain (see `mulix-build` below), but
+nothing requires it.
+
 ## Everyday commands
 
 ```
@@ -116,7 +124,26 @@ those. `mulix-build` merges spec-kit's `implement` command (task
 execution order, progress/failure handling) with superpowers'
 test-driven-development discipline and per-task spike/bounded/
 architectural classification, all in one skill, since mulix treats build
-as a single phase. `mulix-archive` and `mulix-using-mulix` have no
+as a single phase. When superpowers' planning/dispatch skill chain
+(`writing-plans`, `subagent-driven-development`/`executing-plans`,
+`test-driven-development`) is installed, `mulix-build` prefers delegating
+tasks.md execution to it instead of running tasks directly — one clean-
+context subagent per task, spec-compliance and code-quality review before
+a task counts as done — and records that with `mulix state set
+delegated_to_subagents true`; that flag is informational only, since the
+build-complete guard's test-evidence check applies identically either
+way. tasks.md itself stays a pure task list (checkbox + one-line
+description per task): the per-task requirements live in
+`docs/changes/<change>/.runtime/sdd/task_<ID>_brief.md` and the
+per-task execution records in `task_<ID>_report.md` — a `### Task`
+checklist with one checkbox per TDD phase (RED, GREEN, optional
+REFACTOR), whose RED and GREEN boxes must be ticked for the guard to
+pass. Alongside them sit the chain's `progress.md` (ledger),
+`review-*.diff` (review packages), `review.md` (two-phase review
+verdicts), and `dispatch.md` (dispatch plan). Those artifacts go under
+`docs/changes/<change>/.runtime/sdd/`, the one subdirectory the
+PreToolUse hook carves out of the otherwise fully-blocked `.runtime/`
+tree, and only during the build phase. `mulix-archive` and `mulix-using-mulix` have no
 spec-kit counterpart (spec-kit has no archive phase or cross-phase meta
 command) and are unchanged; spec-kit's `constitution` and `converge`
 commands likewise have no dedicated mulix skill — constitution is handled

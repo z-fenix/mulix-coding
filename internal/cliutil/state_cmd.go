@@ -50,6 +50,7 @@ func newStateShowCmd() *cobra.Command {
 			fmt.Printf("tasks_path:    %s\n", s.TasksPath)
 			fmt.Printf("report_path:   %s\n", s.ReportPath)
 			fmt.Printf("verify_result: %s (failures: %d)\n", s.VerifyResult, s.VerifyFailures)
+			fmt.Printf("delegated:     %v\n", s.DelegatedToSubagents)
 			fmt.Printf("archived:      %v\n", s.Archived)
 			printNextEvents(s.Phase)
 			return nil
@@ -144,7 +145,7 @@ func newStateSetFieldCmd() *cobra.Command {
 		Short: "Set one artifact-path or flag field on a change's state (does not change phase)",
 		Long: "Set one of a small allow-list of fields on a change's state: spec_path, plan_path, " +
 			"tasks_path, analyze_path, report_path, clarify_skipped, analyze_skipped, " +
-			"verify_result, archive_confirmation. This never advances the phase; use `mulix state transition` for that.",
+			"verify_result, archive_confirmation, delegated_to_subagents. This never advances the phase; use `mulix state transition` for that.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := state.FindRoot(".")
@@ -211,6 +212,12 @@ func setField(s *flow.State, field, value string) error {
 		default:
 			return fmt.Errorf("archive_confirmation must be one of pending|confirmed, got %q", value)
 		}
+	case "delegated_to_subagents":
+		b, err := parseBool(value)
+		if err != nil {
+			return err
+		}
+		s.DelegatedToSubagents = b
 	default:
 		return fmt.Errorf("unknown or unsettable field %q", field)
 	}

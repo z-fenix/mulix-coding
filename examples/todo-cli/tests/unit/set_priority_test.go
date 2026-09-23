@@ -1,50 +1,59 @@
-package unit
+package tests
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
-
-	"example.com/todo-cli/src/cli"
-	"example.com/todo-cli/src/models"
-	"example.com/todo-cli/src/services"
 )
 
-func TestSetPriority_UpdatesExistingTask(t *testing.T) {
-	store := services.NewStore(filepath.Join(t.TempDir(), "tasks.json"))
-	if err := store.Save([]models.Task{{ID: "1", Priority: "low"}}); err != nil {
-		t.Fatalf("Save: %v", err)
+// T009: todo set-priority <id> <level>.
+
+func TestRun_SetPriorityUpdatesExistingTask(t *testing.T) {
+	store := filepath.Join(t.TempDir(), "tasks.json")
+
+	if _, code := runTodo(t, store, "add", "buy milk", "--priority", "low"); code != 0 {
+		t.Fatalf("seed add failed")
 	}
 
-	if err := cli.SetPriority(store, "1", "high"); err != nil {
-		t.Fatalf("SetPriority: %v", err)
+	out, code := runTodo(t, store, "set-priority", "1", "high")
+	if code != 0 {
+		t.Fatalf("set-priority exit = %d, want 0 (output: %s)", code, out)
 	}
 
-	tasks, err := store.Load()
+	data, err := os.ReadFile(store)
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("reading store: %v", err)
 	}
-	if tasks[0].Priority != "high" {
-		t.Fatalf("Priority = %q, want %q", tasks[0].Priority, "high")
+	if !strings.Contains(string(data), `"high"`) {
+		t.Fatalf("expected priority updated to high, got: %s", data)
 	}
 }
 
-func TestSetPriority_UnknownIDReturnsNotFoundAndLeavesStoreUnmodified(t *testing.T) {
-	store := services.NewStore(filepath.Join(t.TempDir(), "tasks.json"))
-	original := []models.Task{{ID: "1", Priority: "low"}}
-	if err := store.Save(original); err != nil {
-		t.Fatalf("Save: %v", err)
+func TestRun_SetPriorityUnknownIdFailsWithoutModifyingStore(t *testing.T) {
+	store := filepath.Join(t.TempDir(), "tasks.json")
+
+	if _, code := runTodo(t, store, "add", "buy milk", "--priority", "low"); code != 0 {
+		t.Fatalf("seed add failed")
+	}
+	before, err := os.ReadFile(store)
+	if err != nil {
+		t.Fatalf("reading store: %v", err)
 	}
 
-	err := cli.SetPriority(store, "does-not-exist", "high")
-	if err == nil {
-		t.Fatal("expected an error for an unknown task id")
+	out, code := runTodo(t, store, "set-priority", "99", "high")
+	if code == 0 {
+		t.Fatalf("expected non-zero exit for unknown id (output: %s)", out)
+	}
+	if !strings.Contains(strings.ToLower(out), "task not found") {
+		t.Fatalf("expected a task not found error, got: %s", out)
 	}
 
-	tasks, loadErr := store.Load()
-	if loadErr != nil {
-		t.Fatalf("Load: %v", loadErr)
+	after, err := os.ReadFile(store)
+	if err != nil {
+		t.Fatalf("reading store: %v", err)
 	}
-	if tasks[0].Priority != "low" {
-		t.Fatalf("expected store to be unmodified, got Priority = %q", tasks[0].Priority)
+	if string(before) != string(after) {
+		t.Fatalf("store must be unmodified after a failed set-priority\nbefore: %s\nafter:  %s", before, after)
 	}
 }

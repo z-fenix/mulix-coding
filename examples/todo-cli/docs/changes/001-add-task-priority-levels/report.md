@@ -7,8 +7,8 @@
 - `go build ./...`: pass
 - `go vet ./...`: pass
 - `gofmt -l .`: no files need formatting
-- `go test ./... -v -count=1`: all 11 tests pass (4 in `src/models`, 7 in
-  `tests/unit`)
+- `go test ./... -count=1`: all 11 tests pass (6 in `src/models`, 10 test
+  functions in `tests/unit` counting subtests separately)
 
 ## Manual Verification Against Acceptance Scenarios
 
@@ -16,59 +16,55 @@ Ran the built `todo` binary directly against every acceptance scenario
 in spec.md:
 
 - US1 scenario 1 (`todo add "buy milk" --priority high`): task created
-  with priority `high`. Confirmed.
-- US1 scenario 2 (`todo add "buy milk"` with no `--priority`): task
-  created with priority `medium`. Confirmed.
+  with priority `high` in the store JSON. Confirmed.
+- US1 scenario 2 (`todo add` with no `--priority`): task created with
+  the default priority `medium`. Confirmed.
 - US2 scenario 1 (mixed low/high/medium tasks, `todo list`): output
   order high, medium, low. Confirmed.
 - US2 scenario 2 (same-priority tasks at different times, `todo list`):
-  older task listed first. Confirmed (covered by
-  `TestSortByPriority_TiesBreakOldestFirst` and
-  `TestList_OrdersHighMediumLowWithOldestFirstTies`).
-- US3 scenario 1 (`todo set-priority <id> high` on an existing task):
-  priority updated. Confirmed.
-- US3 scenario 2 (`todo set-priority <id> high` on an unknown id): exits
-  non-zero with "task not found", no task modified. Confirmed.
-- Edge case (`--priority urgent`, an invalid value): exits non-zero with
-  a clear error, no task written. Confirmed (see "Issue found and
-  fixed" below — this initially passed silently).
+  the older task (id 2) listed before the newer one (id 4). Confirmed.
+- US3 scenario 1 (`todo set-priority 2 high` on an existing task):
+  priority updated, exit 0. Confirmed.
+- US3 scenario 2 (`todo set-priority 99 high` on an unknown id): exits 1
+  with "task not found", store unmodified. Confirmed.
+- Edge case (`--priority urgent`, an invalid value): exits 2 with a
+  clear error, no task written. Confirmed.
 - Edge case (pre-existing task JSON with no `priority` key at all):
-  loads without error and lists as `medium`. Confirmed by
-  `TestLoad_TaskWithoutPriorityFieldDefaultsToMedium`.
+  loads without error and lists as `medium`. Confirmed
+  (`TestLoad_TaskWithoutPriorityFieldDefaultsToMedium` covers the same
+  path as a unit test).
+- Edge case (flag position): `--priority` trailing the description is
+  honored — covered by implementation (hand-rolled argument scan
+  instead of `flag.FlagSet`) and by
+  `TestRun_AddWithTrailingPriorityFlagIsParsedCorrectly`.
 
-## Issue Found and Fixed During Verification
+## Notes on This Re-Run
 
-Manual smoke-testing the built binary (rather than only the unit tests,
-which called `cli.Add`/`cli.SetPriority` directly with already-split
-arguments) surfaced a real bug: `todo add "buy milk" --priority high`
-silently ignored `--priority` and stored `medium`, and
-`todo add "bad" --priority urgent` exited 0 instead of rejecting the
-invalid value.
+This example was deleted and re-run end-to-end to validate mulix's
+updated build-phase flow. The evidence convention was revised twice
+during the run and settled as follows: tasks.md is a pure task list
+(checkbox + one-line description per task, nothing appended); each
+checked task's execution record is
+`.runtime/sdd/task_<ID>_report.md`, structured as a `### Task`
+checklist where each checkbox is exactly one TDD phase — RED, GREEN,
+or optional REFACTOR — with the RED and GREEN boxes ticked as they
+complete. The build-complete guard requires every checked task's
+report with its RED and GREEN boxes ticked; there is no `[no-test]`
+opt-out. The guard's earlier rejections of this run (evidence lines
+beneath wrapped task descriptions, then briefs carrying a `- tests:`
+line) were correct behavior under the conventions of their moment;
+the same honesty requirement now lives in the ticked checkboxes.
 
-Root cause: `runAdd` used Go's `flag` package to parse `args`, but
-`flag.Parse` stops consuming arguments at the first non-flag token. The
-CLI's own usage puts the description before `--priority`
-(`todo add <description> --priority <level>`), so `flag.Parse` treated
-`--priority high` (or `--priority urgent`) as trailing positional
-arguments and never populated the `--priority` value at all — every
-call silently fell through to the empty-string default.
-
-None of the existing unit tests caught this because they all called
-`cli.Add(store, description, priority)` directly with `priority`
-already split out, bypassing the argv-parsing layer entirely where the
-actual bug was.
-
-Fix: replaced the `flag.FlagSet`-based parsing in `runAdd` with a
-hand-rolled `parseAddArgs` that scans for `--priority` anywhere in the
-argument list rather than requiring flags before positionals. Added
-`TestRun_AddWithTrailingPriorityFlagIsParsedCorrectly` in
-`tests/unit/add_test.go`, which calls `cli.Run` with the actual argv
-shape (`["add", "buy milk", "--priority", "high"]`) instead of calling
-`cli.Add` directly, so this class of bug is now covered by a test that
-exercises the same layer where it occurred.
-
-Re-ran the full manual smoke test and the full automated suite after
-the fix; both are clean (see above).
+- The full SDD artifact set lives under
+  `docs/changes/001-add-task-priority-levels/.runtime/sdd/`:
+  `progress.md` (ledger), `dispatch.md` (dispatch plan),
+  `task_T001_brief.md` through `task_T011_brief.md` (requirements),
+  `task_T001_report.md` through `task_T011_report.md` (execution
+  records), `review-T008-fix1.diff` (the fix-round review package),
+  and `review.md` (two-phase review verdicts).
+  `delegated_to_subagents: true` is recorded in state; the
+  build-complete guard's check applied identically despite the
+  delegation, as intended.
 
 ## Result
 

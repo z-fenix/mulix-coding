@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/mulix-dev/mulix-coding/internal/flow"
+	"github.com/mulix-dev/mulix-coding/internal/scaffold"
 )
 
 // Result is the outcome of one named check.
@@ -194,74 +195,95 @@ func countUncheckedTaskLines(data string) int {
 }
 
 // checkTddEvidencePresent verifies that every checked task in tasks.md
-// carries test-first evidence: either a "- tests: <reference>" line
-// directly beneath the task (blank lines in between are fine), or a
-// "[no-test]" marker on the task line itself for tasks that legitimately
-// have no test (docs, config, scaffolding). This is the structural half
-// of the build phase's TDD discipline — the mulix-build skill drives the
-// red-green-refactor cycle, and this check makes sure the discipline left
-// a trace in tasks.md before the change can advance to verify.
+// has an execution record: a non-empty task report at
+// <tasks dir>/.runtime/sdd/task_<ID>_report.md whose "### Task"
+// checklist shows the work actually done — at least one RED or GREEN
+// phase ticked ("- [x]"), and no RED or GREEN phase left as an open
+// "- [ ]" checkbox. REFACTOR is optional, so its checkbox state is
+// unconstrained; a test-writing task's report legitimately ticks only
+// its RED phase. tasks.md itself only describes the tasks (checkbox +
+// one-line description); the report is where the TDD phases live. This
+// is the structural half of the build phase's TDD discipline — the
+// mulix-build skill drives the cycle, and this check makes sure the
+// discipline left a trace before the change can advance to verify.
 func checkTddEvidencePresent(root string, s flow.State) Result {
 	const name = "tdd-evidence-present"
 	if s.TasksPath == "" {
 		return Result{Name: name, Pass: false, Next: "No tasks path recorded in state."}
 	}
-	full := s.TasksPath
-	if !filepath.IsAbs(full) {
-		full = filepath.Join(root, full)
+	tasksFull := s.TasksPath
+	if !filepath.IsAbs(tasksFull) {
+		tasksFull = filepath.Join(root, s.TasksPath)
 	}
-	data, err := os.ReadFile(full)
+	data, err := os.ReadFile(tasksFull)
 	if err != nil {
 		return Result{Name: name, Pass: false, Next: fmt.Sprintf("Could not read %s: %v", s.TasksPath, err)}
 	}
 
-	var (
-		missing   []string // task IDs (or line text) lacking evidence
-		pendingID string   // task awaiting its evidence line, "" if none
-		sawLine   bool     // whether a non-blank line followed the pending task yet
-	)
+	sddDir := filepath.Join(filepath.Dir(filepath.ToSlash(s.TasksPath)), scaffold.RuntimeDirName, scaffold.RuntimeSddDirName)
+	var missing []string
 	for line := range strings.SplitSeq(string(data), "\n") {
 		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
+		if !strings.HasPrefix(trimmed, "- [x]") {
 			continue
 		}
-		switch {
-		case strings.HasPrefix(trimmed, "- [x]"):
-			// A new task line closes out any still-pending task.
-			if pendingID != "" {
-				missing = append(missing, pendingID)
-			}
-			pendingID = ""
-			if strings.Contains(trimmed, "[no-test]") {
-				continue
-			}
-			pendingID = taskIDOf(trimmed)
-			sawLine = false
-		case strings.HasPrefix(trimmed, "- [ ]"):
-			if pendingID != "" {
-				missing = append(missing, pendingID)
-			}
-			pendingID = ""
-		case pendingID != "" && !sawLine && strings.HasPrefix(trimmed, "- tests:") &&
-			strings.TrimSpace(strings.TrimPrefix(trimmed, "- tests:")) != "":
-			pendingID = ""
-		default:
-			if pendingID != "" {
-				sawLine = true
-			}
+		id := taskIDOf(trimmed)
+		if id == trimmed {
+			// No T-number ID: there is no report filename to even look
+			// for, so the task cannot have left its execution record.
+			missing = append(missing, trimmed)
+			continue
 		}
-	}
-	if pendingID != "" {
-		missing = append(missing, pendingID)
+		reportPath := filepath.Join(sddDir, "task_"+id+"_report.md")
+		reportFull := filepath.Join(root, reportPath)
+		report, err := os.ReadFile(reportFull)
+		if err != nil {
+			missing = append(missing, id)
+			continue
+		}
+		if len(report) == 0 || phaseTickProblem(string(report)) != "" {
+			missing = append(missing, id)
+		}
 	}
 	if len(missing) > 0 {
-		return Result{
-			Name: name,
-			Pass: false,
-			Next: fmt.Sprintf("%s has %d checked task(s) without test evidence, e.g. %q. Add a \"- tests: <test reference>\" line under each checked task, or mark it [no-test] if it legitimately has no test.", s.TasksPath, len(missing), missing[0]),
+		hint := fmt.Sprintf("%s has %d checked task(s) whose report is missing or shows unticked RED/GREEN phases, e.g. %q. Record the task's RED/GREEN/REFACTOR checklist in %s and tick each phase as it completes.", s.TasksPath, len(missing), missing[0], reportPathFor(sddDir, missing[0]))
+		if s.DelegatedToSubagents {
+			hint += " Delegating a task to a subagent does not exempt it — the dispatched subagent's report must still be there."
 		}
+		return Result{Name: name, Pass: false, Next: hint}
 	}
 	return Result{Name: name, Pass: true}
+}
+
+// phaseTickProblem inspects a task report's checkbox checklist and
+// returns "" when the report is acceptable: at least one ticked RED or
+// GREEN phase, and no RED or GREEN phase left unticked. REFACTOR is
+// optional, so an unticked "- [ ] REFACTOR:" line is fine.
+func phaseTickProblem(report string) string {
+	ticked := 0
+	for line := range strings.SplitSeq(report, "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, "- [x] RED:") || strings.HasPrefix(trimmed, "- [x] GREEN:"):
+			ticked++
+		case strings.HasPrefix(trimmed, "- [ ] RED:") || strings.HasPrefix(trimmed, "- [ ] GREEN:"):
+			return "unticked RED/GREEN phase"
+		}
+	}
+	if ticked == 0 {
+		return "no ticked RED/GREEN phase"
+	}
+	return ""
+}
+
+// reportPathFor names the expected report file for an offender in the
+// failure hint. For an ID-less task (the whole line is the "id") it
+// just points at the sdd directory.
+func reportPathFor(sddDir, id string) string {
+	if strings.HasPrefix(id, "T") || strings.HasPrefix(id, "t") {
+		return filepath.ToSlash(filepath.Join(sddDir, "task_"+id+"_report.md"))
+	}
+	return filepath.ToSlash(sddDir) + "/task_<ID>_report.md"
 }
 
 // taskIDOf extracts the leading task ID (T001, T042, ...) from a task

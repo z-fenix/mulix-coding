@@ -1,17 +1,28 @@
 package cli
 
 import (
+	"fmt"
+	"os"
+
 	"example.com/todo-cli/src/models"
 	"example.com/todo-cli/src/services"
 )
 
-// List returns every task from store, ordered high -> medium -> low
-// priority, ties broken by creation order (oldest first).
-func List(store *services.Store) ([]models.Task, error) {
-	tasks, err := store.Load()
+// runList implements `todo list`: tasks ordered high → medium → low,
+// same-priority tasks oldest first (the sort is stable).
+func runList() int {
+	tasks, err := services.Load(storePath())
 	if err != nil {
-		return nil, err
+		fmt.Fprintf(os.Stderr, "todo: %v\n", err)
+		return 1
 	}
 	models.SortByPriority(tasks)
-	return tasks, nil
+	for _, t := range tasks {
+		marker := " "
+		if t.Done {
+			marker = "x"
+		}
+		fmt.Printf("[%s] %d. %s (%s)\n", marker, t.ID, t.Description, t.PriorityOrDefault())
+	}
+	return 0
 }

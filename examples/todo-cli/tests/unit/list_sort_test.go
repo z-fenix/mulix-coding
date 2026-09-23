@@ -1,41 +1,59 @@
-package unit
+package tests
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
-	"time"
-
-	"example.com/todo-cli/src/cli"
-	"example.com/todo-cli/src/models"
-	"example.com/todo-cli/src/services"
 )
 
-func TestList_OrdersHighMediumLowWithOldestFirstTies(t *testing.T) {
-	store := services.NewStore(filepath.Join(t.TempDir(), "tasks.json"))
-	now := time.Now()
+// T007: todo list orders high → medium → low, ties oldest-first.
 
-	tasks := []models.Task{
-		{ID: "1", Description: "low one", Priority: "low", CreatedAt: now},
-		{ID: "2", Description: "high older", Priority: "high", CreatedAt: now.Add(time.Second)},
-		{ID: "3", Description: "medium one", Priority: "medium", CreatedAt: now.Add(2 * time.Second)},
-		{ID: "4", Description: "high newer", Priority: "high", CreatedAt: now.Add(3 * time.Second)},
-	}
-	if err := store.Save(tasks); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
+func TestList_OrdersHighMediumLow(t *testing.T) {
+	store := filepath.Join(t.TempDir(), "tasks.json")
 
-	got, err := cli.List(store)
-	if err != nil {
-		t.Fatalf("List: %v", err)
+	// Add in low, high, medium order; list must not preserve this order.
+	if _, code := runTodo(t, store, "add", "low task", "--priority", "low"); code != 0 {
+		t.Fatalf("seed add failed")
+	}
+	if _, code := runTodo(t, store, "add", "high task", "--priority", "high"); code != 0 {
+		t.Fatalf("seed add failed")
+	}
+	if _, code := runTodo(t, store, "add", "medium task", "--priority", "medium"); code != 0 {
+		t.Fatalf("seed add failed")
 	}
 
-	wantOrder := []string{"2", "4", "3", "1"}
-	if len(got) != len(wantOrder) {
-		t.Fatalf("got %d tasks, want %d", len(got), len(wantOrder))
+	out, code := runTodo(t, store, "list")
+	if code != 0 {
+		t.Fatalf("list exit = %d, want 0 (output: %s)", code, out)
 	}
-	for i, id := range wantOrder {
-		if got[i].ID != id {
-			t.Fatalf("position %d: got id %q, want %q", i, got[i].ID, id)
-		}
+	hi := strings.Index(out, "high task")
+	med := strings.Index(out, "medium task")
+	lo := strings.Index(out, "low task")
+	if hi == -1 || med == -1 || lo == -1 {
+		t.Fatalf("missing task lines in list output: %s", out)
+	}
+	if !(hi < med && med < lo) {
+		t.Fatalf("expected high < medium < low order, got: %s", out)
+	}
+}
+
+func TestList_TiesBreakOldestFirst(t *testing.T) {
+	store := filepath.Join(t.TempDir(), "tasks.json")
+
+	if _, code := runTodo(t, store, "add", "first high", "--priority", "high"); code != 0 {
+		t.Fatalf("seed add failed")
+	}
+	if _, code := runTodo(t, store, "add", "second high", "--priority", "high"); code != 0 {
+		t.Fatalf("seed add failed")
+	}
+
+	out, code := runTodo(t, store, "list")
+	if code != 0 {
+		t.Fatalf("list exit = %d, want 0 (output: %s)", code, out)
+	}
+	first := strings.Index(out, "first high")
+	second := strings.Index(out, "second high")
+	if first == -1 || second == -1 || first > second {
+		t.Fatalf("expected oldest same-priority task listed first, got: %s", out)
 	}
 }

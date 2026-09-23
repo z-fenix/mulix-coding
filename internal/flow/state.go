@@ -42,6 +42,15 @@ type State struct {
 	ClarifySkipped bool `yaml:"clarify_skipped,omitempty"`
 	AnalyzeSkipped bool `yaml:"analyze_skipped,omitempty"`
 
+	// DelegatedToSubagents records whether the build phase's tasks were
+	// dispatched through a subagent-driven execution chain rather than run
+	// directly. It's informational only — no guard check gates on it, since
+	// there's no filesystem evidence guard could check independently of the
+	// agent's own say-so (the tdd-evidence-present check already covers the
+	// one thing that must be true regardless of how a task was executed:
+	// every checked task carries test evidence).
+	DelegatedToSubagents bool `yaml:"delegated_to_subagents,omitempty"`
+
 	VerifyResult   VerifyResult `yaml:"verify_result,omitempty"`
 	VerifyFailures int          `yaml:"verify_failures"`
 

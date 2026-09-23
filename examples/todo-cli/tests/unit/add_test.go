@@ -1,92 +1,88 @@
-package unit
+package tests
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
-
-	"example.com/todo-cli/src/cli"
-	"example.com/todo-cli/src/services"
 )
 
-func TestAdd_ExplicitPriorityIsStored(t *testing.T) {
-	store := services.NewStore(filepath.Join(t.TempDir(), "tasks.json"))
+// T005: add's --priority flag — valid values, the medium default,
+// rejection of invalid values, and position-independent parsing.
 
-	if err := cli.Add(store, "buy milk", "high"); err != nil {
-		t.Fatalf("Add: %v", err)
-	}
+func TestRun_AddWithPriorityStoresLevel(t *testing.T) {
+	for _, level := range []string{"low", "medium", "high"} {
+		t.Run(level, func(t *testing.T) {
+			store := filepath.Join(t.TempDir(), "tasks.json")
 
-	tasks, err := store.Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if len(tasks) != 1 {
-		t.Fatalf("expected 1 task, got %d", len(tasks))
-	}
-	if tasks[0].Priority != "high" {
-		t.Fatalf("Priority = %q, want %q", tasks[0].Priority, "high")
+			out, code := runTodo(t, store, "add", "buy milk", "--priority", level)
+			if code != 0 {
+				t.Fatalf("add exit = %d, want 0 (output: %s)", code, out)
+			}
+
+			data, err := os.ReadFile(store)
+			if err != nil {
+				t.Fatalf("store was not written: %v", err)
+			}
+			var tasks []map[string]any
+			if err := json.Unmarshal(data, &tasks); err != nil {
+				t.Fatalf("parsing store: %v", err)
+			}
+			if len(tasks) != 1 {
+				t.Fatalf("expected 1 task, got %d", len(tasks))
+			}
+			if got := tasks[0]["priority"]; got != level {
+				t.Fatalf("stored priority = %v, want %q", got, level)
+			}
+		})
 	}
 }
 
-func TestAdd_OmittedPriorityDefaultsToMedium(t *testing.T) {
-	store := services.NewStore(filepath.Join(t.TempDir(), "tasks.json"))
+func TestRun_AddWithoutPriorityDefaultsToMedium(t *testing.T) {
+	store := filepath.Join(t.TempDir(), "tasks.json")
 
-	if err := cli.Add(store, "buy milk", ""); err != nil {
-		t.Fatalf("Add: %v", err)
+	out, code := runTodo(t, store, "add", "buy milk")
+	if code != 0 {
+		t.Fatalf("add exit = %d, want 0 (output: %s)", code, out)
 	}
 
-	tasks, err := store.Load()
+	data, err := os.ReadFile(store)
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("store was not written: %v", err)
 	}
-	if got := tasks[0].PriorityOrDefault(); got != "medium" {
-		t.Fatalf("PriorityOrDefault() = %q, want %q", got, "medium")
+	if !strings.Contains(string(data), `"priority": "medium"`) {
+		t.Fatalf("expected stored task to default to medium, got: %s", data)
+	}
+}
+
+func TestRun_AddWithInvalidPriorityRejectsAndWritesNothing(t *testing.T) {
+	store := filepath.Join(t.TempDir(), "tasks.json")
+
+	out, code := runTodo(t, store, "add", "bad input", "--priority", "urgent")
+	if code == 0 {
+		t.Fatalf("expected non-zero exit for invalid --priority (output: %s)", out)
+	}
+	if _, err := os.Stat(store); !os.IsNotExist(err) {
+		t.Fatalf("invalid --priority must not write a task, store stat err = %v", err)
 	}
 }
 
 func TestRun_AddWithTrailingPriorityFlagIsParsedCorrectly(t *testing.T) {
-	dir := t.TempDir()
-	wd, err := os.Getwd()
+	// Regression guard for the usage shape the CLI documents:
+	// description first, flag last. A flag package that stops parsing at
+	// the first positional argument silently drops --priority here.
+	store := filepath.Join(t.TempDir(), "tasks.json")
+
+	out, code := runTodo(t, store, "add", "buy milk", "--priority", "high")
+	if code != 0 {
+		t.Fatalf("add exit = %d, want 0 (output: %s)", code, out)
+	}
+	data, err := os.ReadFile(store)
 	if err != nil {
-		t.Fatalf("Getwd: %v", err)
+		t.Fatalf("store was not written: %v", err)
 	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("Chdir: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(wd) })
-
-	// Regression test: the CLI's usage is "todo add <description>
-	// --priority <level>" (flag trailing the positional description),
-	// which the stdlib flag package does not parse correctly (it stops
-	// consuming at the first non-flag argument). This exercises the
-	// actual argv split, not just the cli.Add function directly.
-	if code := cli.Run([]string{"add", "buy milk", "--priority", "high"}); code != 0 {
-		t.Fatalf("Run(add ... --priority high) exit code = %d, want 0", code)
-	}
-
-	store := services.NewStore("tasks.json")
-	tasks, err := store.Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if len(tasks) != 1 || tasks[0].Priority != "high" {
-		t.Fatalf("expected 1 task with priority high, got %+v", tasks)
-	}
-}
-
-func TestAdd_InvalidPriorityIsRejectedAndNothingIsWritten(t *testing.T) {
-	store := services.NewStore(filepath.Join(t.TempDir(), "tasks.json"))
-
-	err := cli.Add(store, "buy milk", "urgent")
-	if err == nil {
-		t.Fatal("expected an error for an invalid priority value")
-	}
-
-	tasks, loadErr := store.Load()
-	if loadErr != nil {
-		t.Fatalf("Load: %v", loadErr)
-	}
-	if len(tasks) != 0 {
-		t.Fatalf("expected no task to be written on invalid priority, got %d", len(tasks))
+	if !strings.Contains(string(data), `"high"`) {
+		t.Fatalf("expected --priority high after the description to be honored, got: %s", data)
 	}
 }

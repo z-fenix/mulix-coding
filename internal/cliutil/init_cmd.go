@@ -27,6 +27,9 @@ func newInitCmd() *cobra.Command {
 				fmt.Printf("  skipped %s (already present; use --force to overwrite)\n", s)
 			}
 			fmt.Println("mulix initialized. Run `mulix new \"<title>\"` to start your first change.")
+			if found, _ := scaffold.DetectSuperpowers(dir); !found {
+				fmt.Println("hint: the superpowers plugin wasn't detected. The build phase can delegate task execution to its writing-plans/subagent-driven-development/test-driven-development skill chain when it's installed — see the mulix-build skill for details.")
+			}
 			return nil
 		},
 	}

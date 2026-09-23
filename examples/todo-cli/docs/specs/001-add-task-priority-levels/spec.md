@@ -2,7 +2,7 @@
 
 **Change**: `001-add-task-priority-levels`
 
-**Created**: 2025-01-01
+**Created**: 2026-09-23
 
 **Status**: Draft
 
@@ -89,6 +89,9 @@ changed.
   feature existed (no `priority` field in their stored JSON)? They
   must be treated as `medium` rather than causing a parse error or
   being sorted incorrectly.
+- Flags must be accepted wherever the user puts them relative to the
+  description (`todo add "buy milk" --priority high` and
+  `todo add --priority high "buy milk"` behave identically).
 
 ## Requirements *(mandatory)*
 
@@ -97,7 +100,8 @@ changed.
 - **FR-001**: System MUST support three priority levels: `low`,
   `medium`, `high`.
 - **FR-002**: `todo add` MUST accept an optional `--priority` flag
-  accepting one of the three levels.
+  accepting one of the three levels, in any position among add's
+  arguments.
 - **FR-003**: `todo add` MUST default to `medium` when `--priority` is
   omitted.
 - **FR-004**: `todo add` MUST reject any `--priority` value outside the
@@ -133,7 +137,7 @@ changed.
 ## Assumptions
 
 - The existing task store format is a JSON file on disk, one task per
-  entry; this feature adds a field rather than changing the storage
+  array entry; this feature adds a field rather than changing the storage
   mechanism.
 - Priority is the only new sort dimension — no request for
   secondary manual ordering (drag-and-drop, custom ranks) is in scope.

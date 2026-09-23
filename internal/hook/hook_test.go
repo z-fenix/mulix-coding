@@ -103,6 +103,37 @@ func TestDecide_StateFileNeverDirectlyWritable(t *testing.T) {
 	}
 }
 
+func TestDecide_BuildPhaseAllowsSddSubdirWrite(t *testing.T) {
+	s := flow.New("add-login", "")
+	s.Phase = flow.PhaseBuild
+
+	d := Decide("/repo", s, req("Write", "docs/changes/add-login/.runtime/sdd/plan.md"))
+	if !d.Allow {
+		t.Fatalf("expected .runtime/sdd/ to be writable during build (subagent-dispatch artifacts), got: %+v", d)
+	}
+}
+
+func TestDecide_BuildPhaseStillBlocksStateFileInsideRuntimeSdd(t *testing.T) {
+	s := flow.New("add-login", "")
+	s.Phase = flow.PhaseBuild
+
+	d := Decide("/repo", s, req("Edit", "docs/changes/add-login/.runtime/state.yaml"))
+	if d.Allow {
+		t.Fatal("expected state.yaml to stay blocked even though .runtime/sdd/ is now writable")
+	}
+}
+
+func TestDecide_NonBuildPhaseStillBlocksRuntimeSdd(t *testing.T) {
+	s := flow.New("add-login", "")
+	s.Phase = flow.PhasePlan
+	s.SpecPath = "docs/specs/add-login/spec.md"
+
+	d := Decide("/repo", s, req("Write", "docs/changes/add-login/.runtime/sdd/plan.md"))
+	if d.Allow {
+		t.Fatal("expected .runtime/sdd/ to stay blocked outside the build phase")
+	}
+}
+
 func TestDecide_SpecifyPhaseBlocksUnrelatedChangeDir(t *testing.T) {
 	s := flow.New("add-login", "")
 	s.Phase = flow.PhaseSpecify

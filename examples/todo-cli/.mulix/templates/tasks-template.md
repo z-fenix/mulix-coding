@@ -21,10 +21,9 @@ invent phases that don't apply.
      keep this the single, exact-syntax checklist — no nested bullet
      variations, and avoid writing that exact marker syntax in prose
      anywhere in this file (as this comment is careful to do).
-     When the build phase completes a task it appends a "- tests: <test
-     reference>" line directly beneath the checked task (or marks the
-     task line "[no-test]" for tasks with no test, e.g. docs/config) —
-     the guard rejects a checked task without that evidence. -->
+     This file only describes the work. Execution records live in
+     .runtime/sdd/task_<ID>_report.md (requirements in task_<ID>_brief.md),
+     which the build phase writes — nothing is appended to this file. -->
 
 ## Format: `[ID] [P?] [Story] Description`
 

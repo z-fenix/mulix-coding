@@ -19,6 +19,31 @@ func saveStateForTest(t *testing.T, root string, s flow.State) {
 	}
 }
 
+func TestStateSet_DelegatedToSubagentsField(t *testing.T) {
+	dir := chdirTemp(t)
+	initMulixRoot(t, dir)
+
+	s := flow.New("add-login", "")
+	s.Phase = flow.PhaseBuild
+	saveStateForTest(t, dir, s)
+	if err := state.SetActive(dir, "add-login"); err != nil {
+		t.Fatalf("SetActive: %v", err)
+	}
+
+	out, err := runPresetCLI(t, "state", "set", "delegated_to_subagents", "true")
+	if err != nil {
+		t.Fatalf("state set delegated_to_subagents: %v (output: %s)", err, out)
+	}
+
+	loaded, err := state.Load(dir, "add-login")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !loaded.DelegatedToSubagents {
+		t.Fatal("expected delegated_to_subagents to be set to true")
+	}
+}
+
 func TestTransition_ArchivingActiveChangeClearsActiveMarker(t *testing.T) {
 	dir := chdirTemp(t)
 	initMulixRoot(t, dir)

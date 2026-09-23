@@ -1,6 +1,6 @@
 # Implementation Plan: Add Task Priority Levels
 
-**Change**: `001-add-task-priority-levels` | **Date**: 2025-01-01 | **Spec**: docs/specs/001-add-task-priority-levels/spec.md
+**Change**: `001-add-task-priority-levels` | **Date**: 2026-09-23 | **Spec**: docs/specs/001-add-task-priority-levels/spec.md
 
 **Input**: Feature specification from `docs/specs/001-add-task-priority-levels/spec.md`
 
@@ -15,8 +15,8 @@ change an existing task's priority.
 
 **Language/Version**: Go 1.27
 
-**Primary Dependencies**: standard library only (`encoding/json`,
-`flag`); no new dependency needed for this change.
+**Primary Dependencies**: standard library only (`encoding/json`);
+no new dependency needed for this change.
 
 **Storage**: a single JSON file on disk, one task per array entry
 (existing mechanism, unchanged).
@@ -55,14 +55,20 @@ Sorting is implemented as a stable sort keyed on
 in FR-006 falls out of stability rather than needing a secondary
 explicit comparison.
 
+Argument parsing for `todo add` scans the argument list for
+`--priority` wherever it appears (FR-002), rather than using
+`flag.FlagSet`, which stops parsing at the first non-flag token — the
+CLI's usage puts the description before the flag, so a `flag`-based
+parser would silently drop it.
+
 ## Design Notes
 
 `Task.Priority string` — one of `"low" | "medium" | "high"`, empty
 string on disk (from old data) treated as `"medium"` by a single
 `Task.PriorityOrDefault()` accessor used everywhere ordering or display
 matters. Validation of the `--priority` flag value happens at the CLI
-layer (`cmd/add`), before any task is constructed, so an invalid value
-never reaches the store.
+layer, before any task is constructed, so an invalid value never
+reaches the store.
 
 ## Project Structure
 
@@ -76,7 +82,10 @@ docs/changes/001-add-task-priority-levels/
 ├── plan.md               # This file (plan phase)
 ├── tasks.md              # Dependency-ordered checklist (tasks phase)
 ├── analyze.md            # Cross-artifact consistency findings (analyze phase)
-└── report.md             # Verification results (verify phase)
+├── report.md             # Verification results (verify phase)
+└── .runtime/
+    ├── state.yaml        # mulix's own state for this change
+    └── sdd/              # build-phase dispatch/review artifacts
 ```
 
 ### Source Code (repository root)
@@ -84,13 +93,15 @@ docs/changes/001-add-task-priority-levels/
 ```text
 src/
 ├── models/
-│   └── task.go            # Task struct + PriorityOrDefault, sort helper
+│   ├── task.go            # Task struct + PriorityOrDefault, sort helper
+│   └── task_test.go       # extended: priority default + sort comparator
 ├── services/
-│   └── store.go            # JSON load/save (existing, unchanged shape)
+│   └── store.go           # JSON load/save (existing, unchanged shape)
 └── cli/
-    ├── add.go              # --priority flag, validation, default
-    ├── list.go              # priority-ordered listing
-    └── set_priority.go      # new: todo set-priority <id> <level>
+    ├── root.go            # command dispatch (existing)
+    ├── add.go             # new: --priority flag, validation, default
+    ├── list.go            # priority-ordered listing
+    └── set_priority.go    # new: todo set-priority <id> <level>
 
 tests/
 └── unit/
@@ -100,9 +111,9 @@ tests/
     └── backward_compat_test.go   # pre-existing tasks without priority
 ```
 
-**Structure Decision**: Single-project CLI layout (Option 1), matching
-the existing `src/{models,services,cli}` + `tests/unit` structure
-already in place — this feature extends it rather than restructuring.
+**Structure Decision**: Single-project CLI layout, matching the existing
+`src/{models,services,cli}` + `tests/unit` structure already in place —
+this feature extends it rather than restructuring.
 
 ## Risks
 
@@ -116,7 +127,7 @@ already in place — this feature extends it rather than restructuring.
 
 Test-first, in dependency order:
 
-1. `models/task_test.go` (pre-existing, extended): `PriorityOrDefault`
+1. `src/models/task_test.go` (pre-existing, extended): `PriorityOrDefault`
    returns `medium` for empty string, and the sort comparator orders
    high→medium→low with oldest-first ties.
 2. `tests/unit/backward_compat_test.go`: loading a store file with a
@@ -124,7 +135,8 @@ Test-first, in dependency order:
    `PriorityOrDefault() == "medium"`.
 3. `tests/unit/add_test.go`: `--priority high|medium|low` sets the
    field; omitting it defaults to `medium`; an invalid value exits
-   non-zero without writing a task.
+   non-zero without writing a task; the flag is accepted in any
+   argument position.
 4. `tests/unit/list_sort_test.go`: `todo list` output order matches
    FR-005/FR-006 across mixed priorities and creation times.
 5. `tests/unit/set_priority_test.go`: valid id updates priority; unknown

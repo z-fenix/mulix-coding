@@ -13,11 +13,10 @@ test-evidence check.
 
 This phase merges two things: task-execution order and progress tracking
 against tasks.md (Part 1), and a strict test-driven discipline for how
-each task's code gets written (Part 2 — the complete
-`superpowers:test-driven-development` skill). Neither replaces the
-other — task-execution order without TDD discipline produces code nobody
-trusts; TDD discipline without task-execution order produces code that
-ignores the plan.
+each task's code gets written (Part 2). Neither replaces the other —
+task-execution order without TDD discipline produces code nobody trusts;
+TDD discipline without task-execution order produces code that ignores
+the plan.
 
 ## Part 1 — Executing tasks.md
 
@@ -62,14 +61,77 @@ unrelated work.
 
 ## Part 2 — Test-driven development
 
-**If the `superpowers:test-driven-development` skill is installed in
-this environment, invoke it now (Skill tool) and follow it for every
-task in this phase — the live skill is authoritative.** The block below
-is that skill embedded 1:1 — no edits, no omissions, no reordering —
-for environments without the superpowers plugin. Follow the embedded
-copy exactly the same way when the live skill is not available. The
-appendix after it embeds the skill's `writing-good-tests` reference,
-which the target project cannot resolve as a file.
+**If a plugin providing a planning/dispatch skill chain (skills named
+along the lines of `writing-plans`, `subagent-driven-development` or
+`executing-plans`, `test-driven-development`) is installed in this
+environment, prefer delegating this phase's execution to that chain
+over running tasks.md yourself.** Concretely:
+
+1. Turn tasks.md's remaining work into a plan via the `writing-plans`
+   skill (Skill tool), if it isn't already plan-shaped.
+2. Dispatch tasks through `subagent-driven-development` (or
+   `executing-plans` for a simpler serial run) — one clean-context
+   subagent per task, `[P]`-marked independent tasks dispatched in
+   parallel (isolated Git worktrees if the skill sets those up), every
+   other task in tasks.md order. Each dispatched subagent must load
+   `test-driven-development` itself before writing any code — that
+   skill's RED-GREEN-REFACTOR discipline (below, or live) applies
+   inside every subagent's task, not just at the top level.
+3. Require the chain's two-phase review (spec-compliance, then code
+   quality) on each task's output, with fix-loop-until-passing, before
+   the task counts as done.
+4. Immediately after transitioning into this phase, record the
+   delegation so the rest of mulix knows tasks are running through a
+   subagent chain rather than directly:
+   ```
+   mulix state set delegated_to_subagents true
+   ```
+   This is informational, not a gate — the build-complete guard's
+   evidence check (below) applies identically either way, since a
+   dispatched subagent's task report is held to the same standard as a
+   directly-executed one.
+5. Direct all execution artifacts into
+   `docs/changes/<change>/.runtime/sdd/`, not into tasks.md/plan.md
+   themselves — tasks.md only ever describes the tasks (checkbox +
+   one-line description each). The full set:
+   - `progress.md` — the ledger, created at phase start with its
+     identity as the first line (`# SDD ledger — tasks: docs/.../tasks.md`).
+     One status line per task as it completes
+     (`T001: complete (review clean)`), plus fix-round lines
+     (`T008: fix round 1/2 (1 addressed, 0 open)`), deferred-minor
+     lines, and every `Ruling:` you make. This ledger is the recovery
+     map: if session context is lost, trust it over recollection.
+   - `task_<ID>_brief.md` — one per task, written by you before
+     dispatching: the task's requirements (its tasks.md line plus the
+     context a fresh implementer needs — interfaces from earlier
+     tasks, resolved ambiguities). Requirements only; no execution
+     record here.
+   - `task_<ID>_report.md` — one per task, written by the implementer
+     (or by you when running directly): the task's execution record as
+     a `### Task` checklist with one checkbox per TDD phase (see the
+     shape below), ticked `- [x]` as each phase completes. Fix-round
+     records are appended to the same file. The build-complete guard
+     requires this file for every checked task, with the RED and GREEN
+     boxes ticked (an unticked RED/GREEN box fails the guard).
+   - `review-<base>..<head>.diff` — the review package per review:
+     commit list, stat summary, and the full diff for the reviewed
+     range, so a reviewer reads one file. Named per range, so a
+     re-review after fixes gets a fresh file.
+   - `review.md` — the two-phase review verdicts (spec-compliance,
+     code quality) and the fix-loop log, one record per task.
+   - `dispatch.md` — the dispatch plan: waves, subagent-to-task
+     mapping, and the review protocol.
+   That directory is carved out of the otherwise-blocked `.runtime/`
+   tree specifically for this (build phase only), and the artifacts
+   are kept after archive — they are the change's execution paper
+   trail, not scratch.
+
+**If that plugin isn't installed, or you're running a task directly
+rather than through the dispatch chain, follow the embedded
+`test-driven-development` skill below instead — no edits, no
+omissions, no reordering, so it works standalone.** The appendix after
+it embeds the skill's `writing-good-tests` reference, which the target
+project cannot resolve as a file.
 
 --- begin verbatim embed of superpowers:test-driven-development/SKILL.md ---
 # Test-Driven Development (TDD)
@@ -590,31 +652,74 @@ test as tautological.
 - Mocking "just to be safe"
 --- end verbatim embed of superpowers:test-driven-development/writing-good-tests.md (appendix) ---
 
-## Test evidence in tasks.md
+## Task briefs and reports in .runtime/sdd/
 
-The red-green cycle above must leave a trace in tasks.md. When you check
-off a task, immediately append an evidence line directly beneath it:
+tasks.md stays a pure task list: checkbox + one-line description per
+task, nothing else. Each task's execution paper trail lives in two
+files under `docs/changes/<change>/.runtime/sdd/`:
 
+- `task_<ID>_brief.md` — written by you **before dispatching**: the
+  task's requirements, verbatim from tasks.md plus the context a
+  fresh implementer needs (interfaces and decisions from earlier
+  tasks, your resolution of any ambiguity). Requirements only —
+  never an execution record.
+- `task_<ID>_report.md` — written by the implementer (or by you when
+  running the task directly): the task's execution record, structured
+  as a `### Task` checklist where **each checkbox item is exactly one
+  TDD phase** — RED, GREEN, or REFACTOR:
+
+  ```markdown
+  ### Task
+  - [ ] RED: write the failing test — [what behavior it tests]
+  - [ ] GREEN: minimal implementation — [what you implement, citing the RED task it makes pass]
+  - [ ] REFACTOR: cleanup — [what you clean up] (optional)
+  ```
+
+  The rules, no exceptions: never merge RED and GREEN into one
+  checkbox item; every GREEN item cites the RED test it makes pass;
+  every item is a `- [ ]` checkbox (ticked `- [x]` as it completes);
+  items alternate strictly RED → GREEN → (optional REFACTOR). A
+  test-writing task's report legitimately ticks only its RED item.
+  Fix-round records are appended to the same file.
+
+A GREEN task's report, in this shape:
+
+```markdown
+# T002 — Implement Priority field and PriorityOrDefault
+
+Brief: task_T002_brief.md | Implements what T001's failing tests demand.
+
+### Task
+- [x] RED: re-run T001's failing tests — src/models/task_test.go covers
+      empty string → "medium" and high/medium/low sort order
+- [x] GREEN: minimal implementation — `Priority string` with
+      `json:"priority,omitempty"` + `PriorityOrDefault()` +
+      `SortByPriority` in src/models/task.go (makes T001's RED tests pass)
+- [ ] REFACTOR: none needed — the default already lives in one place
 ```
-- [x] T002 [US1] Implement Add in internal/gatecheck/gatecheck.go
-  - tests: internal/gatecheck/gatecheck_test.go TestAdd
-```
 
-A task that legitimately has no test (docs, config, scaffolding) is
-marked `[no-test]` on its task line instead. The build-complete guard
-rejects any checked task whose next non-blank line isn't its evidence
-line — but the guard verifies the trace was left, not that the cycle was
-honestly run. Evidence without a test that actually failed first defeats
-the whole point; don't fabricate it.
+The guard checks the ticked state, not the prose: a report whose RED or
+GREEN box is still `- [ ]` fails build-complete exactly like a missing
+report does. Don't tick a box whose phase didn't honestly happen — a
+ticked GREEN without a test that actually failed first defeats the
+whole point.
+
+The whole run is coordinated through `progress.md` in the same
+directory — the ledger with one status line per task, every fix
+round, every `Ruling:`. Update it as each task completes; after any
+context loss, trust the ledger over recollection.
 
 ## Delegating exploration
 
-If a task requires searching or reading through a lot of unfamiliar code
-before you can write the first test, delegate that exploration to a
-subagent and have it report back only concrete `path:line` citations, not
-full file dumps — keep your own context focused on the task's tests and
-implementation, not on search noise. Exploration is throwaway: once you
-know the approach, start the task's RED step with no code written.
+This is a smaller, narrower delegation than Part 2's dispatch chain —
+it applies whether or not that chain is in use, to any single task you
+are executing yourself. If a task requires searching or reading through
+a lot of unfamiliar code before you can write the first test, delegate
+that exploration to a subagent and have it report back only concrete
+`path:line` citations, not full file dumps — keep your own context
+focused on the task's tests and implementation, not on search noise.
+Exploration is throwaway: once you know the approach, start the task's
+RED step with no code written.
 
 ## Advancing out of this phase
 
@@ -625,6 +730,9 @@ mulix state transition build-complete
 ```
 
 The guard counts unchecked boxes in tasks.md *and* checks the TDD
-evidence trail (every checked task carries a `- tests:` line or a
-`[no-test]` marker). The evidence trail is the floor, not the ceiling —
-the discipline itself is Part 2, followed task by task.
+evidence trail (every checked task has a `task_<ID>_report.md` under
+`.runtime/sdd/` whose RED and GREEN checkboxes are ticked) — this
+applies identically whether tasks ran directly or through Part 2's
+dispatch chain; delegating a task doesn't exempt it from its report.
+The evidence trail is the floor, not the ceiling — the discipline
+itself is Part 2, followed task by task.

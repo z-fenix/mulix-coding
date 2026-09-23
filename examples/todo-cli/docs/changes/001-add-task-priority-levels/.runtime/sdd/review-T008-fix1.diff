@@ -1,0 +1,25 @@
+diff --git a/src/models/task.go (T008 before fix round 1) b/src/models/task.go (T008 after fix round 1)
+index 13f5e9e..0401788 100644
+--- a/src/models/task.go (T008 before fix round 1)
++++ b/src/models/task.go (T008 after fix round 1)
+@@ -1,8 +1,16 @@
+-// SortByPriority orders tasks high → medium → low in place. It is a
+-// stable sort, so tasks with the same priority keep their relative
+-// (creation) order — that is the FR-006 tie-break rule.
++// SortByPriority orders tasks high → medium → low in place, breaking
++// ties within the same priority by creation order, oldest first
++// (FR-006). The explicit created-at comparison makes the contract
++// self-contained: the result is correct regardless of the input
++// slice's order, not just when the caller happens to pass tasks in
++// creation order.
+ func SortByPriority(tasks []Task) {
+ 	sort.SliceStable(tasks, func(i, j int) bool {
+-		return priorityRank(tasks[i].PriorityOrDefault()) > priorityRank(tasks[j].PriorityOrDefault())
++		ri := priorityRank(tasks[i].PriorityOrDefault())
++		rj := priorityRank(tasks[j].PriorityOrDefault())
++		if ri != rj {
++			return ri > rj
++		}
++		return tasks[i].CreatedAt.Before(tasks[j].CreatedAt)
+ 	})
+ }

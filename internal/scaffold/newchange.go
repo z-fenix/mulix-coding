@@ -30,7 +30,22 @@ const ChangesDir = "docs/changes"
 // RuntimeDirName is the subdirectory of a change directory that holds
 // mulix's own runtime state for that change. Like the state file itself,
 // nothing under here is meant to be hand-edited.
+//
+// The one exception is RuntimeSddDirName below: internal/hook carves that
+// one subdirectory out of the otherwise-universal "never hand-edit
+// .runtime/" rule, but only during the build phase.
 const RuntimeDirName = ".runtime"
+
+// RuntimeSddDirName is the subdirectory of RuntimeDirName that holds
+// process artifacts from a delegated (subagent-driven) build execution:
+// dispatch plans, task breakdowns, and review records written while the
+// build phase's tasks.md is worked through by a subagent chain rather
+// than directly. It lives under RuntimeDirName (docs/changes/<change>/
+// .runtime/sdd/) rather than directly under the change directory so it
+// doesn't get mixed up with the change's own plan.md/tasks.md/etc, but
+// unlike the rest of .runtime/ it's writable (build phase only — see
+// internal/hook) since it isn't mulix's own state.
+const RuntimeSddDirName = "sdd"
 
 var nonSlugChars = regexp.MustCompile(`[^a-z0-9]+`)
 

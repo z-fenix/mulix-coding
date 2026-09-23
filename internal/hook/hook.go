@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/mulix-dev/mulix-coding/internal/flow"
+	"github.com/mulix-dev/mulix-coding/internal/scaffold"
 )
 
 // ToolInput is the subset of Claude Code's tool_input payload mulix reads.
@@ -60,7 +61,20 @@ var gatedTools = map[string]bool{"Write": true, "Edit": true}
 // only through guarded transitions, never a raw file edit, or the whole
 // mechanism can be bypassed by editing the scoreboard instead of playing
 // the game.
-const runtimeDirName = ".runtime"
+//
+// The one carve-out is runtimeSddDirName below: during the build phase
+// only, that one subdirectory is writable, since it's not state at all.
+const runtimeDirName = scaffold.RuntimeDirName
+
+// runtimeSddDirName is the subdirectory of runtimeDirName holding
+// process artifacts from a delegated (subagent-driven) build execution:
+// dispatch plans, task breakdowns, and review records. It is writable
+// during the build phase even though the rest of .runtime/ is not,
+// because a delegated build chain needs somewhere to put those artifacts
+// that isn't the change's public-facing docs/changes/<change>/ files.
+// state.yaml itself, and everything else directly under .runtime/, stays
+// blocked in every phase including build.
+const runtimeSddDirName = scaffold.RuntimeSddDirName
 
 // Decide applies the phase whitelist to req against root/s. root is the
 // project root (as found by state.FindRoot); s is the currently active
@@ -75,7 +89,9 @@ func Decide(root string, s flow.State, req Request) Decision {
 
 	rel := relativeSlash(root, req.ToolInput.FilePath)
 
-	if isUnder(rel, "docs/changes/"+s.Change+"/"+runtimeDirName) {
+	runtimeDir := "docs/changes/" + s.Change + "/" + runtimeDirName
+	sddDir := runtimeDir + "/" + runtimeSddDirName
+	if isUnder(rel, runtimeDir) && !(s.Phase == flow.PhaseBuild && isUnder(rel, sddDir)) {
 		return Decision{
 			Allow:  false,
 			Reason: fmt.Sprintf("%s is mulix's own state file and must not be edited directly.", rel),
