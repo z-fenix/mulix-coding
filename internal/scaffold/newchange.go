@@ -11,41 +11,16 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/mulix-dev/mulix-coding/internal/layout"
 )
 
-// SpecsDir is where the per-change requirements doc (spec.md) lives,
-// relative to the project root. It's kept apart from ChangesDir because
-// a spec is meant to stay useful as a reference long after the change
-// that wrote it has been archived, while ChangesDir holds the working
-// artifacts produced while executing that spec.
-const SpecsDir = "docs/specs"
-
-// ChangesDir is where a change's process artifacts (plan.md, tasks.md,
-// analyze.md, report.md) and its runtime state (.runtime/state.yaml)
-// live, relative to the project root. It sits alongside SpecsDir under
-// docs/ so both halves of a change's paper trail are easy to find in one
-// place.
-const ChangesDir = "docs/changes"
-
-// RuntimeDirName is the subdirectory of a change directory that holds
-// mulix's own runtime state for that change. Like the state file itself,
-// nothing under here is meant to be hand-edited.
-//
-// The one exception is RuntimeSddDirName below: internal/hook carves that
-// one subdirectory out of the otherwise-universal "never hand-edit
-// .runtime/" rule, but only during the build phase.
-const RuntimeDirName = ".runtime"
-
-// RuntimeSddDirName is the subdirectory of RuntimeDirName that holds
-// process artifacts from a delegated (subagent-driven) build execution:
-// dispatch plans, task breakdowns, and review records written while the
-// build phase's tasks.md is worked through by a subagent chain rather
-// than directly. It lives under RuntimeDirName (docs/changes/<change>/
-// .runtime/sdd/) rather than directly under the change directory so it
-// doesn't get mixed up with the change's own plan.md/tasks.md/etc, but
-// unlike the rest of .runtime/ it's writable (build phase only — see
-// internal/hook) since it isn't mulix's own state.
-const RuntimeSddDirName = "sdd"
+// SpecsDir and ChangesDir re-export internal/layout's names so existing
+// scaffold callers keep one import.
+const (
+	SpecsDir   = layout.SpecsDir
+	ChangesDir = layout.ChangesDir
+)
 
 var nonSlugChars = regexp.MustCompile(`[^a-z0-9]+`)
 
@@ -114,14 +89,17 @@ type NewChange struct {
 	ChangeDir    string // root-relative, e.g. "docs/changes/001-add-login"
 	ChangeAbsDir string
 
+	RuntimeDir string // root-relative, e.g. ".mulix/.runtime/001-add-login"
+
 	Slug   string
 	Number int
 }
 
 // CreateChangeDir allocates the next number for title, slugifies it, and
-// creates the (empty) docs/specs/<NNN-slug>/ and docs/changes/<NNN-slug>/
-// directories under root. It does not write spec.md or any other
-// artifact — that happens in the specify phase.
+// creates the (empty) docs/specs/<NNN-slug>/, docs/changes/<NNN-slug>/,
+// and .mulix/.runtime/<NNN-slug>/ directories under root. It does not
+// write spec.md or any other artifact — that happens in the specify
+// phase.
 func CreateChangeDir(root, title string) (NewChange, error) {
 	slug := Slugify(title)
 	if slug == "" {
@@ -132,6 +110,11 @@ func CreateChangeDir(root, title string) (NewChange, error) {
 		return NewChange{}, err
 	}
 	change := ChangeID(number, slug)
+
+	runtimeAbsDir := filepath.Join(root, filepath.FromSlash(layout.ChangeRuntimeDir(change)))
+	if err := os.MkdirAll(runtimeAbsDir, 0o755); err != nil {
+		return NewChange{}, fmt.Errorf("scaffold: creating %s: %w", layout.ChangeRuntimeDir(change), err)
+	}
 
 	specRelDir := filepath.Join(SpecsDir, change)
 	specAbsDir := filepath.Join(root, specRelDir)
@@ -151,6 +134,7 @@ func CreateChangeDir(root, title string) (NewChange, error) {
 		SpecAbsDir:   specAbsDir,
 		ChangeDir:    filepath.ToSlash(changeRelDir),
 		ChangeAbsDir: changeAbsDir,
+		RuntimeDir:   layout.ChangeRuntimeDir(change),
 		Slug:         slug,
 		Number:       number,
 	}, nil

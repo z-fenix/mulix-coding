@@ -98,7 +98,7 @@ func TestActive_NoneSetErrors(t *testing.T) {
 
 func TestList_ReturnsSortedChangeIDs(t *testing.T) {
 	root := t.TempDir()
-	// No .mulix/state dir yet.
+	// No .mulix/.runtime dir yet.
 	changes, err := List(root)
 	if err != nil {
 		t.Fatalf("List: %v", err)
@@ -126,5 +126,24 @@ func TestList_ReturnsSortedChangeIDs(t *testing.T) {
 		if changes[i] != want[i] {
 			t.Fatalf("expected %v, got %v", want, changes)
 		}
+	}
+}
+
+func TestList_SkipsSharedAndStatelessDirs(t *testing.T) {
+	root := t.TempDir()
+	if err := Save(root, stateForTest("001-a")); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{"_shared", "002-no-state"} {
+		if err := os.MkdirAll(filepath.Join(root, ".mulix", ".runtime", d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	changes, err := List(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 || changes[0] != "001-a" {
+		t.Fatalf("expected only [001-a], got %v", changes)
 	}
 }

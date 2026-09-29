@@ -1,24 +1,23 @@
 # mulix-coding
 
 A Go CLI that brings spec-driven development, an enforced phase state
-machine, and TDD/brainstorming discipline together for **Claude Code**.
-It's a from-scratch Go reimplementation that borrows ideas from four
-existing projects rather than wrapping any of them:
+machine, and the full superpowers skill set together for **Claude
+Code**. It borrows from four existing projects:
 
-- **spec-kit** — the constitution → specify → clarify → plan → tasks →
-  analyze → implement workflow shape and template structure.
+- **spec-kit** — the constitution → specify → clarify front half of the
+  workflow, its spec template, preset system, and taskstoissues.
 - **comet** — the phase state machine, guard-check gating, and (the core
   enforcement mechanism) a Claude Code `PreToolUse` hook that blocks
   `Write`/`Edit` calls that don't match the current phase.
-- **superpowers** — the brainstorming skill's spike/bounded/architectural
-  classification and the test-driven-development red-green-refactor
-  discipline, both folded directly into mulix's `mulix-specify` and
-  `mulix-build` skills rather than kept as a separate phase.
+- **superpowers** — embedded whole: every skill ships inside mulix and
+  runs the design → tasks → build → verify → archive half of the
+  workflow (brainstorming, writing-plans, test-driven-development,
+  subagent-driven-development / executing-plans,
+  verification-before-completion, finishing-a-development-branch), with
+  its artifacts under `.mulix/.runtime/`.
 - **caveman** — the discipline of writing `SKILL.md` `description` fields
   as trigger conditions only (never a process summary, so the model can't
-  use the summary as an excuse to skip loading the real content), and the
-  principle of delegating exploration to cheap subagents that report back
-  citations instead of full file dumps.
+  use the summary as an excuse to skip loading the real content).
 
 **Phase 1 scope**: Claude Code only. No other agent host, no caveman
 compression engine/BM25/browse infrastructure, no comet Native
@@ -31,31 +30,64 @@ and **taskstoissues** (GitHub issue conversion) — see below.
 ## The workflow
 
 ```
-specify → clarify → plan → tasks → analyze → build → verify → archive
+specify → clarify → design → tasks → build → verify → archive
 ```
 
-There is no separate brainstorm phase: `mulix-specify` opens by
-classifying the work (spike/bounded/architectural) and getting explicit
-approval before spec.md gets written, and `mulix-build` repeats that
-classification per task before writing its first test. Brainstorming is a
-discipline embedded at those two points, not a phase with its own state
-node.
+| Phase   | What happens | Artifact |
+|---------|--------------|----------|
+| specify | WHAT/WHY, no design | `docs/specs/<change>/spec.md` |
+| clarify | up to 5 targeted questions | spec.md `## Clarifications` |
+| design  | `brainstorming`: classify (bounded / architectural), design, explicit approval | `.mulix/.runtime/<change>/specs/*-design.md` (architectural) |
+| tasks   | `writing-plans`: the approved design becomes an executable plan, reviewed by a plan-reviewer subagent | `docs/changes/<change>/tasks.md` (`## Task N` sections) |
+| build   | `test-driven-development`, executed by `subagent-driven-development` or `executing-plans` (chosen at build start) | code + tests; `.mulix/.runtime/<change>/sdd/tasks/` |
+| verify  | `verification-before-completion`: full suite, spec check, rulings review | `docs/changes/<change>/report.md` |
+| archive | `finishing-a-development-branch`: merge / PR / keep | — |
 
-A change's artifacts split across two directories: `docs/specs/<change>/`
-holds the requirements doc (`spec.md`), meant to stay a useful reference
-long after the change is archived; `docs/changes/<change>/` holds the process
-artifacts produced while executing that spec (`plan.md`, `tasks.md`,
-`analyze.md`, `report.md`) plus the change's own runtime state at
-`docs/changes/<change>/.runtime/state.yaml`, not in conversation context. Two
-independent mechanisms enforce phase gating from that state:
+A change's files live in three places: `docs/specs/<change>/` holds the
+requirements doc, meant to stay a useful reference long after the
+change is archived; `docs/changes/<change>/` holds the plan (`tasks.md`)
+and the verification report; `.mulix/.runtime/<change>/` holds
+everything produced while the change runs — its state (`state.yaml`),
+the approved design doc, visual-companion sessions (git-ignored: they
+carry a session key), and the build's execution workspace (ledger, task
+briefs, task reports with RED/GREEN evidence, test logs, review
+packages). `.mulix/.runtime/_shared/` catches output from the embedded
+skills when no change is active.
 
-1. **Guards** (`internal/guard`) check concrete evidence — an artifact
-   exists and is non-empty, `tasks.md` has no unchecked boxes, a
-   verification report was actually written — before a transition is
-   allowed to apply.
+Two independent mechanisms enforce phase gating from that state:
+
+1. **Guards** (`internal/guard`) check concrete evidence before a
+   transition applies — an artifact exists and is non-empty, the design
+   approval and execution method are recorded, tasks.md has `## Task N`
+   sections numbered 1..n, the execution ledger has a `Task N: complete`
+   line for every task, and every task's report carries RED and GREEN
+   evidence.
 2. **The PreToolUse hook** (`mulix hook`) intercepts every `Write`/`Edit`
    call Claude Code makes and blocks any file outside the current phase's
-   whitelist, independent of whether the agent remembers to check first.
+   whitelist — including inside `.mulix/.runtime/`, where `state.yaml` is
+   never writable and each phase may write only the subdirectory it
+   produces (design: `specs/`, `brainstorm/`; build: `sdd/`).
+
+## Embedded superpowers
+
+All fourteen [superpowers](https://github.com/obra/superpowers) skills
+are vendored into `assets/superpowers/` (MIT; license and version
+installed to `.mulix/superpowers/`) and installed by `mulix init` as
+plain project skills in `.claude/skills/<name>/` — whole directories,
+with their prompt templates, references, and scripts. mulix doesn't
+detect or require the superpowers plugin; if it's also enabled, disable
+it for mulix projects so its bootstrap and namespaced copies don't
+compete with the phase gates.
+
+`scripts/sync-superpowers.sh <superpowers-dir>` regenerates the vendored
+copy. It rewrites `superpowers:<skill>` references to the unprefixed
+names, moves every artifact location under `.mulix/.runtime/` (the
+scripts resolve the change from `.mulix/active`), and applies a small set
+of exact patches — brainstorming's terminal states give way to mulix's
+design gate, writing-plans writes `docs/changes/<change>/tasks.md` with
+`## Task N` headings and no execution handoff, the executors keep their
+workspace as the change's record. Each patch must match exactly once, so
+upstream drift fails the sync instead of shipping a half-rewritten copy.
 
 ## Install into a project
 
@@ -63,23 +95,18 @@ independent mechanisms enforce phase gating from that state:
 mulix init
 ```
 
-This writes `.mulix/` (shared constitution template, bundled templates,
-the `active`-change marker once a change exists), `.claude/skills/mulix-*/SKILL.md`
-(one skill per phase, plus a `mulix-using-mulix` bootstrap skill), and
-merges a `PreToolUse` hook entry into `.claude/settings.json` without
-disturbing any hooks/settings you already have. It does not create
-`docs/specs/` or `docs/changes/` — those come from `mulix new`, once there's an
-actual change to hold. Re-running `mulix init` is safe (it skips files
-that already exist); pass `--force` to overwrite mulix-owned files after
-an upgrade.
-
-If the [superpowers](https://github.com/obra/superpowers) plugin isn't
-detected (project-scope `.claude/plugins/`, or the user-scope
-`~/.claude/plugins/installed_plugins.json` entry Claude Code's plugin
-installer writes), `mulix init` prints a one-line, non-blocking hint
-about it — the build phase can use its skill chain to delegate task
-execution to a reviewed subagent chain (see `mulix-build` below), but
-nothing requires it.
+This writes `.mulix/` (shared constitution, bundled templates, the
+superpowers license/version, `.mulix/.runtime/.gitignore`, and the
+`active`-change marker once a change exists), `.claude/skills/` (one
+`mulix-*` skill per phase, the `using-mulix` bootstrap skill, and every
+embedded superpowers skill), and merges a `PreToolUse` hook entry into
+`.claude/settings.json` without disturbing any hooks/settings you
+already have. It does not create `docs/specs/` or `docs/changes/` —
+those come from `mulix new`, once there's an actual change to hold.
+Re-running `mulix init` is safe (it skips files that already exist);
+`mulix update` refreshes installed files after an upgrade, three-way
+merging local edits and removing files this version no longer ships if
+they're untouched.
 
 ## Everyday commands
 
@@ -92,69 +119,41 @@ mulix guard <event>              # run guards read-only, without transitioning
 mulix status                     # list every change and its phase
 ```
 
+Settable fields: `spec_path`, `tasks_path`, `report_path`,
+`clarify_skipped`, `design_track` (`bounded|architectural`),
+`design_path`, `design_approved`, `execution_method`
+(`subagent-driven|inline`), `verify_result`, `archive_confirmation`.
+
 `mulix hook` is the `PreToolUse` entry point Claude Code invokes; you
 won't normally run it by hand.
 
 ## Templates
 
-`assets/templates/*.md` (installed to `.mulix/templates/` by `mulix
-init`) closely mirror spec-kit's own `templates/*.md`: same section
-headings, the same `FR-###`/`SC-###` requirement numbering, the same
-Setup/Foundational/User-Story task phases, the same `## Clarifications`
-and Constitution Check conventions. This is deliberate — content produced
-by mulix should be recognizable to anyone coming from spec-kit. The one
-structural template spec-kit has that mulix doesn't port is
-`checklist-template.md`, since mulix has no equivalent `/checklist`
-command in its phase list.
+`assets/templates/*.md` are installed to `.mulix/templates/` by `mulix
+init`. `spec-template.md` and `constitution-template.md` mirror
+spec-kit's (`FR-###`/`SC-###` numbering, User Scenarios, `##
+Clarifications`, principle placeholders). `tasks-template.md` is the
+layout writing-plans produces: plan header with Spec and Design links,
+Global Constraints, Review Focus, and one `## Task N: <name>` section
+per task with RED → GREEN → commit steps.
 
-Guards (`internal/guard`) only depend on two exact strings inside these
-templates regardless of everything else in them: a literal `##
-Clarifications` heading in `spec.md`, and literal `- [ ]` checkbox syntax
-in `tasks.md`. Everything else is free-form prose the relevant skill fills
-in.
+Guards depend on exactly two structural rules in those files: a literal
+`## Clarifications` heading in spec.md, and `## Task N` headings in
+tasks.md numbered 1..n (headings inside ``` fences don't count). Those
+headings are also what the build executors extract task briefs by and
+what the ledger's `Task N: complete` lines refer to.
 
-The `SKILL.md` files that drive each phase (`assets/skills/mulix-*`)
-mirror spec-kit's corresponding `templates/commands/*.md` prompt in the
-same way — the specify/clarify/plan/tasks/analyze/verify/taskstoissues
-skills port the substance of each spec-kit command's execution steps,
-checklist formats, and severity/classification rules, without spec-kit's
-`.specify/extensions.yml` hook mechanism, multi-script variants, or
-`handoffs` field, since mulix has no equivalent infrastructure for any of
-those. `mulix-build` merges spec-kit's `implement` command (task
-execution order, progress/failure handling) with superpowers'
-test-driven-development discipline and per-task spike/bounded/
-architectural classification, all in one skill, since mulix treats build
-as a single phase. When superpowers' planning/dispatch skill chain
-(`writing-plans`, `subagent-driven-development`/`executing-plans`,
-`test-driven-development`) is installed, `mulix-build` prefers delegating
-tasks.md execution to it instead of running tasks directly — one clean-
-context subagent per task, spec-compliance and code-quality review before
-a task counts as done — and records that with `mulix state set
-delegated_to_subagents true`; that flag is informational only, since the
-build-complete guard's test-evidence check applies identically either
-way. tasks.md itself stays a pure task list (checkbox + one-line
-description per task): the per-task requirements live in
-`docs/changes/<change>/.runtime/sdd/task_<ID>_brief.md` and the
-per-task execution records in `task_<ID>_report.md` — a `### Task`
-checklist with one checkbox per TDD phase (RED, GREEN, optional
-REFACTOR), whose RED and GREEN boxes must be ticked for the guard to
-pass. Alongside them sit the chain's `progress.md` (ledger),
-`review-*.diff` (review packages), `review.md` (two-phase review
-verdicts), and `dispatch.md` (dispatch plan). Those artifacts go under
-`docs/changes/<change>/.runtime/sdd/`, the one subdirectory the
-PreToolUse hook carves out of the otherwise fully-blocked `.runtime/`
-tree, and only during the build phase. `mulix-archive` and `mulix-using-mulix` have no
-spec-kit counterpart (spec-kit has no archive phase or cross-phase meta
-command) and are unchanged; spec-kit's `constitution` and `converge`
-commands likewise have no dedicated mulix skill — constitution is handled
-directly by `mulix init`, and converge (scanning the codebase for gaps
-against spec/plan/tasks and appending catch-up tasks) is a newer spec-kit
-feature with no equivalent step in mulix's current phase list.
+The phase skills (`assets/skills/mulix-*`) are thin: `mulix-specify` and
+`mulix-clarify` port spec-kit's specify/clarify commands; `mulix-design`,
+`mulix-tasks`, `mulix-build`, `mulix-verify`, and `mulix-archive` each
+invoke an embedded superpowers skill and add only what mulix needs
+around it — where output goes, which paths apply, and how the phase's
+gate replaces the skill's own hand-off.
 
 ## Presets
 
 A preset overrides one or more of mulix's bundled templates
-(`spec-template`, `plan-template`, etc). The override stack, checked in
+(`spec-template`, `tasks-template`, etc). The override stack, checked in
 order, is:
 
 ```
@@ -203,6 +202,9 @@ works any time `tasks.md` exists and is not gated by `internal/flow`.
 go build ./...
 go vet ./...
 go test ./...
+./scripts/smoke-e2e.sh        # init + one change through all 7 phases in a
+                              # throwaway git repo (needs git + bash)
+./scripts/sync-superpowers.sh <superpowers-dir>   # re-vendor superpowers
 ```
 
 Module: `github.com/mulix-dev/mulix-coding`, Go 1.27.

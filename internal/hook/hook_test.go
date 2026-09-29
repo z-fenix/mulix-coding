@@ -40,20 +40,20 @@ func TestDecide_SpecifyPhaseAllowsSpecDirWrite(t *testing.T) {
 	}
 }
 
-func TestDecide_PlanPhaseAllowsChangeDirWrite(t *testing.T) {
+func TestDecide_TasksPhaseAllowsChangeDirWrite(t *testing.T) {
 	s := flow.New("add-login", "")
-	s.Phase = flow.PhasePlan
+	s.Phase = flow.PhaseTasks
 	s.SpecPath = "docs/specs/add-login/spec.md"
 
-	d := Decide("/repo", s, req("Write", "docs/changes/add-login/plan.md"))
+	d := Decide("/repo", s, req("Write", "docs/changes/add-login/tasks.md"))
 	if !d.Allow {
 		t.Fatalf("expected write under the change dir to be allowed, got: %+v", d)
 	}
 }
 
-func TestDecide_PlanPhaseBlocksSpecDirWrite(t *testing.T) {
+func TestDecide_TasksPhaseBlocksSpecDirWrite(t *testing.T) {
 	s := flow.New("add-login", "")
-	s.Phase = flow.PhasePlan
+	s.Phase = flow.PhaseTasks
 	s.SpecPath = "docs/specs/add-login/spec.md"
 
 	d := Decide("/repo", s, req("Write", "docs/specs/add-login/spec.md"))
@@ -94,43 +94,72 @@ func TestDecide_ArchivePhaseBlocksAllWrites(t *testing.T) {
 }
 
 func TestDecide_StateFileNeverDirectlyWritable(t *testing.T) {
-	s := flow.New("add-login", "")
-	s.Phase = flow.PhaseBuild // even the unrestricted phase
-
-	d := Decide("/repo", s, req("Edit", "docs/changes/add-login/.runtime/state.yaml"))
-	if d.Allow {
-		t.Fatal("expected state file writes to always be blocked")
+	for _, phase := range flow.Phases {
+		s := flow.New("add-login", "")
+		s.Phase = phase
+		d := Decide("/repo", s, req("Edit", ".mulix/.runtime/add-login/state.yaml"))
+		if d.Allow {
+			t.Fatalf("expected state.yaml writes to be blocked in phase %q", phase)
+		}
 	}
 }
 
-func TestDecide_BuildPhaseAllowsSddSubdirWrite(t *testing.T) {
+func TestDecide_DesignPhaseWritesOnlyRuntimeDesignDirs(t *testing.T) {
 	s := flow.New("add-login", "")
-	s.Phase = flow.PhaseBuild
-
-	d := Decide("/repo", s, req("Write", "docs/changes/add-login/.runtime/sdd/plan.md"))
-	if !d.Allow {
-		t.Fatalf("expected .runtime/sdd/ to be writable during build (subagent-dispatch artifacts), got: %+v", d)
-	}
-}
-
-func TestDecide_BuildPhaseStillBlocksStateFileInsideRuntimeSdd(t *testing.T) {
-	s := flow.New("add-login", "")
-	s.Phase = flow.PhaseBuild
-
-	d := Decide("/repo", s, req("Edit", "docs/changes/add-login/.runtime/state.yaml"))
-	if d.Allow {
-		t.Fatal("expected state.yaml to stay blocked even though .runtime/sdd/ is now writable")
-	}
-}
-
-func TestDecide_NonBuildPhaseStillBlocksRuntimeSdd(t *testing.T) {
-	s := flow.New("add-login", "")
-	s.Phase = flow.PhasePlan
+	s.Phase = flow.PhaseDesign
 	s.SpecPath = "docs/specs/add-login/spec.md"
 
-	d := Decide("/repo", s, req("Write", "docs/changes/add-login/.runtime/sdd/plan.md"))
-	if d.Allow {
-		t.Fatal("expected .runtime/sdd/ to stay blocked outside the build phase")
+	for _, p := range []string{
+		".mulix/.runtime/add-login/specs/2026-01-01-login-design.md",
+		".mulix/.runtime/add-login/brainstorm/123-456/content/layout.html",
+	} {
+		if d := Decide("/repo", s, req("Write", p)); !d.Allow {
+			t.Fatalf("expected %s to be writable in design, got: %+v", p, d)
+		}
+	}
+	for _, p := range []string{
+		".mulix/.runtime/add-login/sdd/tasks/progress.md",
+		"docs/changes/add-login/tasks.md",
+		"docs/specs/add-login/spec.md",
+		"src/main.go",
+	} {
+		if d := Decide("/repo", s, req("Write", p)); d.Allow {
+			t.Fatalf("expected %s to be blocked in design", p)
+		}
+	}
+}
+
+func TestDecide_BuildPhaseAllowsSddWorkspaceOnly(t *testing.T) {
+	s := flow.New("add-login", "")
+	s.Phase = flow.PhaseBuild
+
+	if d := Decide("/repo", s, req("Write", ".mulix/.runtime/add-login/sdd/tasks/task-1-report.md")); !d.Allow {
+		t.Fatalf("expected the sdd workspace to be writable during build, got: %+v", d)
+	}
+	if d := Decide("/repo", s, req("Write", ".mulix/.runtime/add-login/specs/design.md")); d.Allow {
+		t.Fatal("expected the approved design doc to be frozen once build starts")
+	}
+}
+
+func TestDecide_OtherChangesRuntimeDirBlocked(t *testing.T) {
+	s := flow.New("add-login", "")
+	s.Phase = flow.PhaseBuild
+
+	if d := Decide("/repo", s, req("Write", ".mulix/.runtime/other/sdd/tasks/progress.md")); d.Allow {
+		t.Fatal("expected another change's runtime dir to be blocked")
+	}
+	// segment-aware: add-login-2 is not add-login
+	if d := Decide("/repo", s, req("Write", ".mulix/.runtime/add-login-2/sdd/x.md")); d.Allow {
+		t.Fatal("expected a prefix-sharing change id not to match")
+	}
+}
+
+func TestDecide_SharedRuntimeDirAlwaysWritable(t *testing.T) {
+	s := flow.New("add-login", "")
+	s.Phase = flow.PhaseArchive
+
+	if d := Decide("/repo", s, req("Write", ".mulix/.runtime/_shared/diagnosing-superpowers/abc/report.md")); !d.Allow {
+		t.Fatalf("expected .mulix/.runtime/_shared/ to be writable in any phase, got: %+v", d)
 	}
 }
 

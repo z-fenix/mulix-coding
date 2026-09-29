@@ -19,28 +19,53 @@ func saveStateForTest(t *testing.T, root string, s flow.State) {
 	}
 }
 
-func TestStateSet_DelegatedToSubagentsField(t *testing.T) {
+func TestStateSet_DesignAndBuildFields(t *testing.T) {
 	dir := chdirTemp(t)
 	initMulixRoot(t, dir)
 
 	s := flow.New("add-login", "")
-	s.Phase = flow.PhaseBuild
+	s.Phase = flow.PhaseDesign
 	saveStateForTest(t, dir, s)
 	if err := state.SetActive(dir, "add-login"); err != nil {
 		t.Fatalf("SetActive: %v", err)
 	}
 
-	out, err := runPresetCLI(t, "state", "set", "delegated_to_subagents", "true")
-	if err != nil {
-		t.Fatalf("state set delegated_to_subagents: %v (output: %s)", err, out)
+	for _, kv := range [][2]string{
+		{"design_track", "architectural"},
+		{"design_path", ".mulix/.runtime/add-login/specs/2026-01-01-login-design.md"},
+		{"design_approved", "true"},
+		{"execution_method", "inline"},
+	} {
+		if out, err := runPresetCLI(t, "state", "set", kv[0], kv[1]); err != nil {
+			t.Fatalf("state set %s: %v (output: %s)", kv[0], err, out)
+		}
 	}
 
 	loaded, err := state.Load(dir, "add-login")
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if !loaded.DelegatedToSubagents {
-		t.Fatal("expected delegated_to_subagents to be set to true")
+	if loaded.DesignTrack != flow.TrackArchitectural || !loaded.DesignApproved ||
+		loaded.DesignPath == "" || loaded.ExecutionMethod != flow.ExecInline {
+		t.Fatalf("fields not recorded: %+v", loaded)
+	}
+}
+
+func TestStateSet_RejectsUnknownTrackAndMethod(t *testing.T) {
+	dir := chdirTemp(t)
+	initMulixRoot(t, dir)
+	saveStateForTest(t, dir, flow.New("add-login", ""))
+	if err := state.SetActive(dir, "add-login"); err != nil {
+		t.Fatalf("SetActive: %v", err)
+	}
+
+	// spike is a brainstorming path, but not one a change with a spec,
+	// plan, and tasks can take.
+	if _, err := runPresetCLI(t, "state", "set", "design_track", "spike"); err == nil {
+		t.Fatal("expected design_track=spike to be rejected")
+	}
+	if _, err := runPresetCLI(t, "state", "set", "execution_method", "yolo"); err == nil {
+		t.Fatal("expected an unknown execution_method to be rejected")
 	}
 }
 

@@ -1,8 +1,8 @@
 // Package state persists and loads flow.State to/from
-// docs/changes/<change>/.runtime/state.yaml. Decoding is strict: unknown
-// fields fail to load rather than being silently dropped. The state file
-// is the single source of truth both the guard checks and the PreToolUse
-// hook read from — if it can't be trusted, the whole strong flow control
+// .mulix/.runtime/<change>/state.yaml. Decoding is strict: unknown fields
+// fail to load rather than being silently dropped. The state file is the
+// single source of truth both the guard checks and the PreToolUse hook
+// read from — if it can't be trusted, the whole strong flow control
 // mechanism is void.
 package state
 
@@ -16,20 +16,19 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/mulix-dev/mulix-coding/internal/flow"
+	"github.com/mulix-dev/mulix-coding/internal/layout"
 )
 
-// changesDir mirrors scaffold.ChangesDir. It's a separate constant (not an
-// import) to avoid a state<->scaffold import cycle; both packages must
-// agree on "docs/changes" as the directory name.
-const changesDir = "docs/changes"
-
-// runtimeDirName mirrors scaffold.RuntimeDirName, for the same reason.
-const runtimeDirName = ".runtime"
-
 // PathFor returns the on-disk path for a change's state file, given the
-// project root: docs/changes/<change>/.runtime/state.yaml.
+// project root: .mulix/.runtime/<change>/state.yaml.
 func PathFor(root, change string) string {
-	return filepath.Join(root, changesDir, sanitize(change), runtimeDirName, "state.yaml")
+	return filepath.Join(root, filepath.FromSlash(layout.ChangeRuntimePath(sanitize(change), layout.StateFile)))
+}
+
+// legacyPathFor is where mulix.state.v1 kept a change's state file. Load
+// only uses it to explain a failure, never to read state from.
+func legacyPathFor(root, change string) string {
+	return filepath.Join(root, filepath.FromSlash(layout.ChangesDir), sanitize(change), ".runtime", "state.yaml")
 }
 
 // sanitize keeps change IDs filesystem-safe without silently rewriting
@@ -43,6 +42,9 @@ func Load(root, change string) (flow.State, error) {
 	path := PathFor(root, change)
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if _, legacyErr := os.Stat(legacyPathFor(root, change)); legacyErr == nil {
+			return flow.State{}, fmt.Errorf("state: %s not found, but a mulix.state.v1 file exists at %s; this mulix keeps state under %s with a different phase model — start the change again with `mulix new`", path, legacyPathFor(root, change), layout.RuntimeDir)
+		}
 		return flow.State{}, fmt.Errorf("state: reading %s: %w", path, err)
 	}
 
@@ -67,6 +69,9 @@ func Load(root, change string) (flow.State, error) {
 func Save(root string, s flow.State) error {
 	if s.Change == "" {
 		return fmt.Errorf("state: cannot save state with empty change id")
+	}
+	if s.Change == layout.Shared {
+		return fmt.Errorf("state: %q is reserved and cannot be a change id", layout.Shared)
 	}
 	s.UpdatedAt = time.Now().UTC()
 

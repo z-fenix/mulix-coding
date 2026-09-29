@@ -7,6 +7,7 @@ import (
 
 	"github.com/mulix-dev/mulix-coding/internal/flow"
 	"github.com/mulix-dev/mulix-coding/internal/guard"
+	"github.com/mulix-dev/mulix-coding/internal/layout"
 	"github.com/mulix-dev/mulix-coding/internal/state"
 )
 
@@ -45,12 +46,13 @@ func newStateShowCmd() *cobra.Command {
 			fmt.Printf("change:        %s\n", s.Change)
 			fmt.Printf("phase:         %s\n", s.Phase)
 			fmt.Printf("branch:        %s\n", s.Branch)
+			fmt.Printf("runtime_dir:   %s\n", layout.ChangeRuntimeDir(s.Change))
 			fmt.Printf("spec_path:     %s\n", s.SpecPath)
-			fmt.Printf("plan_path:     %s\n", s.PlanPath)
 			fmt.Printf("tasks_path:    %s\n", s.TasksPath)
+			fmt.Printf("design:        track=%s approved=%v path=%s\n", s.DesignTrack, s.DesignApproved, s.DesignPath)
+			fmt.Printf("execution:     %s\n", s.ExecutionMethod)
 			fmt.Printf("report_path:   %s\n", s.ReportPath)
 			fmt.Printf("verify_result: %s (failures: %d)\n", s.VerifyResult, s.VerifyFailures)
-			fmt.Printf("delegated:     %v\n", s.DelegatedToSubagents)
 			fmt.Printf("archived:      %v\n", s.Archived)
 			printNextEvents(s.Phase)
 			return nil
@@ -143,9 +145,10 @@ func newStateSetFieldCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set <field> <value>",
 		Short: "Set one artifact-path or flag field on a change's state (does not change phase)",
-		Long: "Set one of a small allow-list of fields on a change's state: spec_path, plan_path, " +
-			"tasks_path, analyze_path, report_path, clarify_skipped, analyze_skipped, " +
-			"verify_result, archive_confirmation, delegated_to_subagents. This never advances the phase; use `mulix state transition` for that.",
+		Long: "Set one of a small allow-list of fields on a change's state: spec_path, " +
+			"tasks_path, report_path, clarify_skipped, design_track (bounded|architectural), " +
+			"design_path, design_approved, execution_method (subagent-driven|inline), " +
+			"verify_result, archive_confirmation. This never advances the phase; use `mulix state transition` for that.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := state.FindRoot(".")
@@ -178,12 +181,8 @@ func setField(s *flow.State, field, value string) error {
 	switch field {
 	case "spec_path":
 		s.SpecPath = value
-	case "plan_path":
-		s.PlanPath = value
 	case "tasks_path":
 		s.TasksPath = value
-	case "analyze_path":
-		s.AnalyzePath = value
 	case "report_path":
 		s.ReportPath = value
 	case "clarify_skipped":
@@ -192,12 +191,24 @@ func setField(s *flow.State, field, value string) error {
 			return err
 		}
 		s.ClarifySkipped = b
-	case "analyze_skipped":
+	case "design_track":
+		if !flow.DesignTrack(value).Valid() {
+			return fmt.Errorf("design_track must be one of %v, got %q", flow.DesignTracks, value)
+		}
+		s.DesignTrack = flow.DesignTrack(value)
+	case "design_path":
+		s.DesignPath = value
+	case "design_approved":
 		b, err := parseBool(value)
 		if err != nil {
 			return err
 		}
-		s.AnalyzeSkipped = b
+		s.DesignApproved = b
+	case "execution_method":
+		if !flow.ExecutionMethod(value).Valid() {
+			return fmt.Errorf("execution_method must be one of %v, got %q", flow.ExecutionMethods, value)
+		}
+		s.ExecutionMethod = flow.ExecutionMethod(value)
 	case "verify_result":
 		switch value {
 		case string(flow.VerifyPending), string(flow.VerifyPass), string(flow.VerifyFail):
@@ -212,12 +223,6 @@ func setField(s *flow.State, field, value string) error {
 		default:
 			return fmt.Errorf("archive_confirmation must be one of pending|confirmed, got %q", value)
 		}
-	case "delegated_to_subagents":
-		b, err := parseBool(value)
-		if err != nil {
-			return err
-		}
-		s.DelegatedToSubagents = b
 	default:
 		return fmt.Errorf("unknown or unsettable field %q", field)
 	}

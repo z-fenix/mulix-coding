@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 
 	"github.com/mulix-dev/mulix-coding/assets"
+	"github.com/mulix-dev/mulix-coding/internal/layout"
 )
 
 // InitOptions controls what mulix init writes into a target project.
@@ -27,25 +29,41 @@ type InitResult struct {
 	Skipped []string
 }
 
-// Init materializes .mulix/ (templates, shared constitution), .claude/skills/mulix-*,
-// and the PreToolUse + SessionStart hook entries in .claude/settings.json.
-// It does not create docs/changes/ or docs/specs/ — those come from
-// `mulix new`, once there's an actual change to hold. It is idempotent:
-// re-running without --force only fills in what's missing.
+// runtimeGitignore keeps the parts of .mulix/.runtime/ that must never be
+// committed out of git: visual-companion sessions (they hold a session
+// key) and the shared scratch directory. State, design docs, and
+// execution workspaces stay trackable — they're the change's record.
+const runtimeGitignore = "# Written by mulix init.\n*/" + layout.BrainstormDir + "/\n/" + layout.Shared + "/\n"
+
+// Init materializes .mulix/ (templates, shared constitution, the runtime
+// directory), .claude/skills/ (mulix's phase skills plus every embedded
+// superpowers skill), and the PreToolUse hook entry in
+// .claude/settings.json. It does not create docs/changes/ or docs/specs/
+// — those come from `mulix new`, once there's an actual change to hold.
+// It is idempotent: re-running without --force only fills in what's
+// missing.
 func Init(opts InitOptions) (InitResult, error) {
 	var res InitResult
 
-	if err := writeIfAbsentOrForced(&res, opts, ".mulix/memory/constitution.md", func() ([]byte, error) {
+	if err := writeIfAbsentOrForced(&res, opts, ".mulix/memory/constitution.md", 0o644, func() ([]byte, error) {
 		return fs.ReadFile(assets.Templates, "templates/constitution-template.md")
 	}); err != nil {
 		return res, err
 	}
 
-	if err := installSkills(&res, opts); err != nil {
-		return res, err
+	files, err := managedFiles()
+	if err != nil {
+		return res, fmt.Errorf("scaffold: reading bundled content: %w", err)
+	}
+	for _, f := range files {
+		if err := writeIfAbsentOrForced(&res, opts, f.Rel, f.Mode(), func() ([]byte, error) { return f.Data, nil }); err != nil {
+			return res, err
+		}
 	}
 
-	if err := installTemplates(&res, opts); err != nil {
+	if err := writeIfAbsentOrForced(&res, opts, path.Join(layout.RuntimeDir, ".gitignore"), 0o644, func() ([]byte, error) {
+		return []byte(runtimeGitignore), nil
+	}); err != nil {
 		return res, err
 	}
 
@@ -61,8 +79,8 @@ func Init(opts InitOptions) (InitResult, error) {
 // skipped instead of silently left alone with no report at all. Every
 // file mulix writes also gets a baseline copy under .mulix/.installed/ —
 // the common ancestor `mulix update` later three-way merges against.
-func writeIfAbsentOrForced(res *InitResult, opts InitOptions, relPath string, content func() ([]byte, error)) error {
-	full := filepath.Join(opts.Root, relPath)
+func writeIfAbsentOrForced(res *InitResult, opts InitOptions, relPath string, mode fs.FileMode, content func() ([]byte, error)) error {
+	full := filepath.Join(opts.Root, filepath.FromSlash(relPath))
 	if _, err := os.Stat(full); err == nil && !opts.Force {
 		res.Skipped = append(res.Skipped, relPath)
 		return nil
@@ -71,67 +89,13 @@ func writeIfAbsentOrForced(res *InitResult, opts InitOptions, relPath string, co
 	if err != nil {
 		return fmt.Errorf("scaffold: reading bundled content for %s: %w", relPath, err)
 	}
-	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-		return fmt.Errorf("scaffold: creating dir for %s: %w", relPath, err)
-	}
-	if err := os.WriteFile(full, data, 0o644); err != nil {
+	if err := writeFileMode(full, data, mode); err != nil {
 		return fmt.Errorf("scaffold: writing %s: %w", relPath, err)
 	}
-	baseFull := baselinePath(opts.Root, relPath)
-	if err := os.MkdirAll(filepath.Dir(baseFull), 0o755); err != nil {
-		return fmt.Errorf("scaffold: creating baseline dir for %s: %w", relPath, err)
-	}
-	if err := os.WriteFile(baseFull, data, 0o644); err != nil {
+	if err := writeFile(baselinePath(opts.Root, relPath), data); err != nil {
 		return fmt.Errorf("scaffold: writing baseline for %s: %w", relPath, err)
 	}
 	res.Written = append(res.Written, relPath)
-	return nil
-}
-
-// installSkills copies every bundled assets/skills/<name>/SKILL.md to
-// .claude/skills/<name>/SKILL.md.
-func installSkills(res *InitResult, opts InitOptions) error {
-	entries, err := fs.ReadDir(assets.Skills, "skills")
-	if err != nil {
-		return fmt.Errorf("scaffold: reading bundled skills: %w", err)
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		rel := filepath.ToSlash(filepath.Join(".claude", "skills", e.Name(), "SKILL.md"))
-		srcPath := "skills/" + e.Name() + "/SKILL.md"
-		err := writeIfAbsentOrForced(res, opts, rel, func() ([]byte, error) {
-			return fs.ReadFile(assets.Skills, srcPath)
-		})
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// installTemplates copies every bundled template into .mulix/templates/,
-// so the skills' Outline steps can reference a local, project-relative
-// path rather than reaching back into the mulix binary.
-func installTemplates(res *InitResult, opts InitOptions) error {
-	entries, err := fs.ReadDir(assets.Templates, "templates")
-	if err != nil {
-		return fmt.Errorf("scaffold: reading bundled templates: %w", err)
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		rel := filepath.ToSlash(filepath.Join(".mulix", "templates", e.Name()))
-		srcPath := "templates/" + e.Name()
-		err := writeIfAbsentOrForced(res, opts, rel, func() ([]byte, error) {
-			return fs.ReadFile(assets.Templates, srcPath)
-		})
-		if err != nil {
-			return err
-		}
-	}
 	return nil
 }
 

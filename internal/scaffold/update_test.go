@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -190,5 +191,73 @@ func TestInit_RecordsBaselineForWrittenFiles(t *testing.T) {
 	base := readProjectFile(t, root, ".mulix/.installed/.mulix/templates/tasks-template.md")
 	if !reflect.DeepEqual(src, base) {
 		t.Fatal("baseline should mirror the installed template")
+	}
+}
+
+func TestInit_InstallsEverySuperpowersSkillDirectory(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Init(InitOptions{Root: root}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	for _, rel := range []string{
+		".claude/skills/writing-plans/plan-document-reviewer-prompt.md",
+		".claude/skills/subagent-driven-development/implementer-prompt.md",
+		".claude/skills/executing-plans/scripts/task-done",
+		".claude/skills/using-superpowers/references/claude-code-tools.md",
+		".mulix/superpowers/VERSION",
+	} {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err != nil {
+			t.Errorf("expected %s to be installed: %v", rel, err)
+		}
+	}
+	// Installed skills must not point back at the upstream plugin.
+	body := readProjectFile(t, root, ".claude/skills/subagent-driven-development/SKILL.md")
+	if strings.Contains(body, "superpowers:") || strings.Contains(body, ".superpowers/") {
+		t.Fatal("expected the installed skill to be rewritten for mulix")
+	}
+}
+
+func TestInit_ScriptsAreExecutable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no executable permission bit")
+	}
+	root := t.TempDir()
+	if _, err := Init(InitOptions{Root: root}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(root, ".claude", "skills", "subagent-driven-development", "scripts", "task-brief"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o100 == 0 {
+		t.Fatalf("expected task-brief to be executable, mode %v", info.Mode())
+	}
+}
+
+func TestUpdate_RemovesUntouchedObsoleteFileKeepsModifiedOne(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Init(InitOptions{Root: root}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	// Simulate an older install: both obsolete files with baselines, one
+	// edited locally since.
+	for _, rel := range []string{".claude/skills/mulix-plan/SKILL.md", ".mulix/templates/analyze-template.md"} {
+		writeProjectFile(t, root, rel, "old\n")
+		writeProjectFile(t, root, ".mulix/.installed/"+rel, "old\n")
+	}
+	writeProjectFile(t, root, ".mulix/templates/analyze-template.md", "user edit\n")
+
+	res, err := Update(UpdateOptions{Root: root})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".claude", "skills", "mulix-plan")); !os.IsNotExist(err) {
+		t.Fatalf("expected the untouched obsolete skill (and its dir) to be removed, stat err = %v", err)
+	}
+	if got := readProjectFile(t, root, ".mulix/templates/analyze-template.md"); got != "user edit\n" {
+		t.Fatalf("expected the modified obsolete file to be kept, got %q", got)
+	}
+	if len(res.Removed) != 1 {
+		t.Fatalf("expected exactly one removal, got %+v", res.Removed)
 	}
 }

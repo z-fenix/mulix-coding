@@ -13,3 +13,10 @@ var Templates embed.FS
 
 //go:embed presets
 var Presets embed.FS
+
+// Superpowers holds every superpowers skill (superpowers/skills/<name>/,
+// whole directories), rewritten for mulix by scripts/sync-superpowers.sh,
+// plus the upstream LICENSE and a VERSION stamp.
+//
+//go:embed superpowers
+var Superpowers embed.FS

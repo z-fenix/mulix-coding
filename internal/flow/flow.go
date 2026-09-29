@@ -5,9 +5,10 @@
 // allow/block decision from the same source of truth.
 package flow
 
-import "slices"
-
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // Phase is one step of the mulix workflow.
 type Phase string
@@ -15,9 +16,14 @@ type Phase string
 const (
 	PhaseSpecify Phase = "specify"
 	PhaseClarify Phase = "clarify"
-	PhasePlan    Phase = "plan"
-	PhaseTasks   Phase = "tasks"
-	PhaseAnalyze Phase = "analyze"
+	// PhaseDesign runs the brainstorming skill: classify the change,
+	// design it, get explicit approval.
+	PhaseDesign Phase = "design"
+	// PhaseTasks runs the writing-plans skill: the approved design becomes
+	// tasks.md, an executable "## Task N" plan.
+	PhaseTasks Phase = "tasks"
+	// PhaseBuild executes tasks.md under test-driven-development, through
+	// subagent-driven-development or executing-plans.
 	PhaseBuild   Phase = "build"
 	PhaseVerify  Phase = "verify"
 	PhaseArchive Phase = "archive"
@@ -28,9 +34,8 @@ const (
 var Phases = []Phase{
 	PhaseSpecify,
 	PhaseClarify,
-	PhasePlan,
+	PhaseDesign,
 	PhaseTasks,
-	PhaseAnalyze,
 	PhaseBuild,
 	PhaseVerify,
 	PhaseArchive,
@@ -49,10 +54,8 @@ const (
 	EventSpecComplete    Event = "spec-complete"
 	EventClarifyComplete Event = "clarify-complete"
 	EventClarifySkipped  Event = "clarify-skipped"
-	EventPlanComplete    Event = "plan-complete"
+	EventDesignApproved  Event = "design-approved"
 	EventTasksComplete   Event = "tasks-complete"
-	EventAnalyzeComplete Event = "analyze-complete"
-	EventAnalyzeSkipped  Event = "analyze-skipped"
 	EventBuildComplete   Event = "build-complete"
 	EventVerifyPass      Event = "verify-pass"
 	EventVerifyFail      Event = "verify-fail"
@@ -84,44 +87,34 @@ var Table = []Transition{
 	{
 		Event:     EventClarifyComplete,
 		From:      PhaseClarify,
-		To:        PhasePlan,
+		To:        PhaseDesign,
 		GuardRefs: []string{"clarify-recorded"},
 	},
 	{
 		Event:     EventClarifySkipped,
 		From:      PhaseClarify,
-		To:        PhasePlan,
+		To:        PhaseDesign,
 		GuardRefs: []string{"clarify-skip-acknowledged"},
 	},
 	{
-		Event:     EventPlanComplete,
-		From:      PhasePlan,
+		// There is no skip event: every brainstorming path ends in an
+		// explicit approval.
+		Event:     EventDesignApproved,
+		From:      PhaseDesign,
 		To:        PhaseTasks,
-		GuardRefs: []string{"plan-artifacts-present"},
+		GuardRefs: []string{"design-approved"},
 	},
 	{
 		Event:     EventTasksComplete,
 		From:      PhaseTasks,
-		To:        PhaseAnalyze,
-		GuardRefs: []string{"tasks-artifact-present"},
-	},
-	{
-		Event:     EventAnalyzeComplete,
-		From:      PhaseAnalyze,
 		To:        PhaseBuild,
-		GuardRefs: []string{"analyze-report-present"},
-	},
-	{
-		Event:     EventAnalyzeSkipped,
-		From:      PhaseAnalyze,
-		To:        PhaseBuild,
-		GuardRefs: []string{"analyze-skip-acknowledged"},
+		GuardRefs: []string{"tasks-artifact-present", "tasks-have-task-sections"},
 	},
 	{
 		Event:     EventBuildComplete,
 		From:      PhaseBuild,
 		To:        PhaseVerify,
-		GuardRefs: []string{"tasks-all-checked", "tdd-evidence-present"},
+		GuardRefs: []string{"execution-method-chosen", "plan-tasks-complete", "tdd-evidence-present"},
 		Effect: func(s *State) {
 			s.VerifyResult = VerifyPending
 		},

@@ -15,7 +15,7 @@ func newUpdateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update",
 		Short: "Update bundled skills and templates in this project, three-way merging local edits",
-		Long: "Refresh the mulix skills (.claude/skills/*/SKILL.md) and templates " +
+		Long: "Refresh the mulix and embedded superpowers skills (.claude/skills/*/**) and templates " +
 			"(.mulix/templates/*) installed in this project to the versions bundled " +
 			"with this mulix binary. Files untouched since install are updated in " +
 			"place; locally modified files are three-way merged against the baseline " +
@@ -33,10 +33,11 @@ func newUpdateCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("update: %d written, %d updated, %d merged, %d conflicted, %d skipped\n",
-				len(res.Written), len(res.Updated), len(res.Merged), len(res.Conflicted), len(res.Skipped))
+			fmt.Printf("update: %d written, %d updated, %d merged, %d conflicted, %d removed, %d skipped\n",
+				len(res.Written), len(res.Updated), len(res.Merged), len(res.Conflicted), len(res.Removed), len(res.Skipped))
 			printCategory("merged", res.Merged)
 			printCategory("conflicted", res.Conflicted)
+			printCategory("removed", res.Removed)
 			printCategory("skipped", res.Skipped)
 			return nil
 		},

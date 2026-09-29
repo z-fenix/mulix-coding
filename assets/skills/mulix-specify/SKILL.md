@@ -1,45 +1,29 @@
 ---
 name: mulix-specify
-description: Use when the active change is in the specify phase, to classify the work, get approval, and write the functional spec.
+description: Use when the active change is in the specify phase, to write the functional spec before any design or code.
 ---
 
 # Specify phase
 
-Do not write spec.md, plan.md, code, or scaffold anything until you've
-classified the work and, for anything beyond a spike, gotten explicit
-human approval of the approach. Writing a spec for the wrong feature
-wastes every phase downstream of it.
+Write `docs/specs/<change>/spec.md` from `.mulix/templates/spec-template.md`
+(or `mulix preset resolve spec-template` if a preset overrides it),
+replacing every placeholder with concrete details while preserving
+section order and headings.
 
-## Classify the work first, out loud
+This phase fixes WHAT the change must do and WHY. HOW — approaches,
+components, data flow — is the design phase's job (brainstorming), and
+the task breakdown is the tasks phase's (writing-plans). Don't classify
+the work, propose approaches, or explore designs here; if the request is
+already a design, extract the requirements it implies and leave the
+design itself for the design phase.
 
-- **Spike** — a feasibility question ("can X even work?"). State the
-  question and a 2-3 sentence investigation plan, get a nod, investigate
-  cheaply, report a recommendation before writing spec.md.
-- **Bounded** — a well-scoped change to existing behavior. Explore the
-  relevant context, ask clarifying questions one at a time, present a
-  short in-chat design, stop for explicit approval before writing spec.md.
-- **Architectural** — a new subsystem, or a change that breaks an
-  interface. Explore context, ask clarifying questions one at a time
-  (purpose, constraints, success criteria), propose 2-3 approaches with
-  trade-offs and a recommendation, present the design in sections asking
-  approval after each. For this track only, write the agreed design to
-  `docs/<date>-<topic>-design.md` before starting spec.md — it's the
-  reference spec.md will point back to instead of repeating.
-
-The ratchet is one-way: if you discover hidden complexity mid-exploration,
-upgrade the track (bounded → architectural), never downgrade to skip
-work. Reaching for "let's just call this bounded" to avoid the extra
-approval round is the doubt itself, not a resolution of it.
-
-Once the human has explicitly approved (a real "yes", not silence), write
-`docs/specs/<change>/spec.md` from the spec template, replacing every
-placeholder with concrete details while preserving section order and
-headings.
+spec.md is the change's durable requirements record: it outlives the
+change, and every later phase checks its output against it.
 
 ## Quick guidelines
 
 - Focus on **WHAT** users need and **WHY**. Avoid **HOW** to implement (no
-  tech stack, APIs, code structure) — that belongs in the plan phase.
+  tech stack, APIs, code structure) — that belongs in the design phase.
 - Write for business stakeholders, not developers.
 - Mandatory sections must be completed for every feature. Include optional
   sections only when relevant. When a section doesn't apply, remove it

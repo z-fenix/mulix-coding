@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/mulix-dev/mulix-coding/internal/flow"
-	"github.com/mulix-dev/mulix-coding/internal/scaffold"
+	"github.com/mulix-dev/mulix-coding/internal/layout"
 )
 
 // ToolInput is the subset of Claude Code's tool_input payload mulix reads.
@@ -55,26 +55,17 @@ type Decision struct {
 // exploration or verification commands.
 var gatedTools = map[string]bool{"Write": true, "Edit": true}
 
-// runtimeDirName is the subdirectory of a change directory holding
-// mulix's own state for that change (docs/changes/<change>/.runtime/). It is
-// always off-limits to direct Write/Edit, in every phase: state must move
-// only through guarded transitions, never a raw file edit, or the whole
-// mechanism can be bypassed by editing the scoreboard instead of playing
-// the game.
-//
-// The one carve-out is runtimeSddDirName below: during the build phase
-// only, that one subdirectory is writable, since it's not state at all.
-const runtimeDirName = scaffold.RuntimeDirName
-
-// runtimeSddDirName is the subdirectory of runtimeDirName holding
-// process artifacts from a delegated (subagent-driven) build execution:
-// dispatch plans, task breakdowns, and review records. It is writable
-// during the build phase even though the rest of .runtime/ is not,
-// because a delegated build chain needs somewhere to put those artifacts
-// that isn't the change's public-facing docs/changes/<change>/ files.
-// state.yaml itself, and everything else directly under .runtime/, stays
-// blocked in every phase including build.
-const runtimeSddDirName = scaffold.RuntimeSddDirName
+// runtimeWritable lists, per phase, the subdirectories of the active
+// change's .mulix/.runtime/<change>/ that phase may write: the design
+// phase's brainstorming output (design doc, visual-companion screens) and
+// the build phase's execution workspace. state.yaml is in no list — state
+// moves only through guarded transitions, never a raw file edit, or the
+// whole mechanism can be bypassed by editing the scoreboard instead of
+// playing the game.
+var runtimeWritable = map[flow.Phase][]string{
+	flow.PhaseDesign: {layout.DesignDir, layout.BrainstormDir},
+	flow.PhaseBuild:  {layout.SddDir},
+}
 
 // Decide applies the phase whitelist to req against root/s. root is the
 // project root (as found by state.FindRoot); s is the currently active
@@ -89,14 +80,8 @@ func Decide(root string, s flow.State, req Request) Decision {
 
 	rel := relativeSlash(root, req.ToolInput.FilePath)
 
-	runtimeDir := "docs/changes/" + s.Change + "/" + runtimeDirName
-	sddDir := runtimeDir + "/" + runtimeSddDirName
-	if isUnder(rel, runtimeDir) && !(s.Phase == flow.PhaseBuild && isUnder(rel, sddDir)) {
-		return Decision{
-			Allow:  false,
-			Reason: fmt.Sprintf("%s is mulix's own state file and must not be edited directly.", rel),
-			Next:   "Use `mulix state transition <change> <event>` (which runs guards) instead of editing state files by hand.",
-		}
+	if isUnder(rel, layout.RuntimeDir) {
+		return decideRuntime(s, rel)
 	}
 
 	allowed, unrestricted := allowedPrefixes(s)
@@ -111,15 +96,6 @@ func Decide(root string, s flow.State, req Request) Decision {
 		}
 	}
 	for _, prefix := range allowed {
-		if prefix == "docs" && (isUnder(rel, "docs/specs") || isUnder(rel, "docs/changes")) {
-			// docs/specs/<other-change>/ and docs/changes/<other-change>/
-			// are both reachable through this prefix too, which would
-			// defeat the point of checking specDirFor separately above
-			// and would let the specify phase write into other changes'
-			// process artifacts. Design docs belong directly under
-			// docs/, not nested in docs/specs/ or docs/changes/.
-			continue
-		}
 		if isUnder(rel, prefix) {
 			return Decision{Allow: true}
 		}
@@ -131,33 +107,68 @@ func Decide(root string, s flow.State, req Request) Decision {
 	}
 }
 
+// decideRuntime handles writes under .mulix/.runtime/: the shared
+// directory is always writable, another change's directory never is, and
+// the active change's directory only in the subdirectories its current
+// phase produces.
+func decideRuntime(s flow.State, rel string) Decision {
+	if isUnder(rel, path.Join(layout.RuntimeDir, layout.Shared)) {
+		return Decision{Allow: true}
+	}
+	own := layout.ChangeRuntimeDir(s.Change)
+	if !isUnder(rel, own) {
+		return Decision{
+			Allow:  false,
+			Reason: fmt.Sprintf("%s belongs to another change's runtime directory; the active change is %q.", rel, s.Change),
+			Next:   "Use `mulix state select <change>` if you meant to work on that change.",
+		}
+	}
+	if rel == path.Join(own, layout.StateFile) {
+		return Decision{
+			Allow:  false,
+			Reason: fmt.Sprintf("%s is mulix's own state file and must not be edited directly.", rel),
+			Next:   "Use `mulix state set` / `mulix state transition <event>` (which runs guards) instead of editing state files by hand.",
+		}
+	}
+	for _, sub := range runtimeWritable[s.Phase] {
+		if isUnder(rel, path.Join(own, sub)) {
+			return Decision{Allow: true}
+		}
+	}
+	var dirs []string
+	for _, sub := range runtimeWritable[s.Phase] {
+		dirs = append(dirs, path.Join(own, sub))
+	}
+	reason := fmt.Sprintf("Phase %q permits no writes under %s.", s.Phase, own)
+	if len(dirs) > 0 {
+		reason = fmt.Sprintf("Phase %q only permits runtime writes under %s; %s is outside that.", s.Phase, strings.Join(dirs, ", "), rel)
+	}
+	return Decision{
+		Allow:  false,
+		Reason: reason,
+		Next:   "Runtime artifacts belong to the phase that produces them: design docs and brainstorm screens to design, execution workspaces to build.",
+	}
+}
+
 // allowedPrefixes returns the set of slash-separated, root-relative path
-// prefixes writable in s.Phase, or unrestricted=true when every path is
-// writable (the build phase: that's where source code and tests actually
-// get written).
+// prefixes writable in s.Phase outside .mulix/.runtime/, or
+// unrestricted=true when every path is writable (the build phase: that's
+// where source code and tests actually get written).
 //
 // The spec (docs/specs/<change>/spec.md, the requirements doc) and the
-// rest of a change's artifacts (docs/changes/<change>/plan.md, tasks.md,
-// ..., the process artifacts produced while executing that spec) live in
-// two separate directories, so which one is writable depends on the
-// phase: specify and clarify both still edit spec.md directly, everything
-// from plan onward writes into the change directory instead.
+// change's process artifacts (docs/changes/<change>/tasks.md, report.md)
+// live in two separate directories, so which one is writable depends on
+// the phase: specify and clarify edit spec.md, tasks and verify write the
+// change directory. The design phase writes only under .mulix/.runtime/
+// (see runtimeWritable) — its output is the design doc, not docs/.
 func allowedPrefixes(s flow.State) (prefixes []string, unrestricted bool) {
 	switch s.Phase {
-	case flow.PhaseSpecify:
-		// Architectural-track design docs may also land under docs/,
-		// before spec.md exists. (docs/specs and docs/changes are
-		// excluded from that blanket allowance below, in the
-		// prefix-matching loop.)
-		return []string{specDirFor(s), "docs"}, false
-	case flow.PhaseClarify:
+	case flow.PhaseSpecify, flow.PhaseClarify:
 		return []string{specDirFor(s)}, false
-	case flow.PhasePlan, flow.PhaseTasks, flow.PhaseAnalyze, flow.PhaseVerify:
+	case flow.PhaseTasks, flow.PhaseVerify:
 		return []string{changeDirFor(s)}, false
 	case flow.PhaseBuild:
 		return nil, true
-	case flow.PhaseArchive:
-		return []string{}, false
 	default:
 		return []string{}, false
 	}
@@ -172,18 +183,14 @@ func specDirFor(s flow.State) string {
 	if s.SpecPath != "" {
 		return path.Dir(filepath.ToSlash(s.SpecPath))
 	}
-	return "docs/specs/" + s.Change
+	return layout.SpecsDir + "/" + s.Change
 }
 
 // changeDirFor returns the change's process-artifact directory,
-// preferring the state-recorded plan path (once it exists, from the plan
-// phase onward) and falling back to the docs/changes/<change>/
-// convention before plan.md has been written.
+// docs/changes/<change>/. It's fixed by convention rather than read from
+// state, so a mis-set tasks_path can't widen what the phase may write.
 func changeDirFor(s flow.State) string {
-	if s.PlanPath != "" {
-		return path.Dir(filepath.ToSlash(s.PlanPath))
-	}
-	return "docs/changes/" + s.Change
+	return layout.ChangesDir + "/" + s.Change
 }
 
 // relativeSlash makes p relative to root (if p is absolute) and normalizes

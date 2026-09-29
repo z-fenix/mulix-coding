@@ -22,7 +22,13 @@ func TestInit_WritesExpectedFiles(t *testing.T) {
 		".mulix/memory/constitution.md",
 		".mulix/templates/spec-template.md",
 		".claude/skills/mulix-build/SKILL.md",
-		".claude/skills/mulix-using-mulix/SKILL.md",
+		".claude/skills/using-mulix/SKILL.md",
+		".claude/skills/brainstorming/SKILL.md",
+		".claude/skills/brainstorming/scripts/start-server.sh",
+		".claude/skills/test-driven-development/SKILL.md",
+		".claude/skills/subagent-driven-development/scripts/sdd-workspace",
+		".mulix/superpowers/LICENSE",
+		".mulix/.runtime/.gitignore",
 		".claude/settings.json",
 	}
 	for _, rel := range mustExist {

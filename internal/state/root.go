@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/mulix-dev/mulix-coding/internal/layout"
 )
 
 // ErrNoRoot is returned by FindRoot when no .mulix directory is found
@@ -84,11 +86,11 @@ func ActiveIs(root, change string) bool {
 	return active == change
 }
 
-// List returns the change ids of every change directory under root that
-// has a state file, sorted alphabetically. Used by `mulix status` to
-// enumerate all changes rather than just the active one.
+// List returns the change ids of every change runtime directory under
+// root that has a state file, sorted alphabetically. Used by `mulix
+// status` to enumerate all changes rather than just the active one.
 func List(root string) ([]string, error) {
-	dir := filepath.Join(root, changesDir)
+	dir := filepath.Join(root, filepath.FromSlash(layout.RuntimeDir))
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -98,10 +100,10 @@ func List(root string) ([]string, error) {
 	}
 	var changes []string
 	for _, e := range entries {
-		if !e.IsDir() {
+		if !e.IsDir() || e.Name() == layout.Shared {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(dir, e.Name(), runtimeDirName, "state.yaml")); err != nil {
+		if _, err := os.Stat(filepath.Join(dir, e.Name(), layout.StateFile)); err != nil {
 			continue
 		}
 		changes = append(changes, e.Name())

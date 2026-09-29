@@ -14,7 +14,7 @@ func newInitCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "init",
-		Short: "Install mulix into a project: .mulix/ state dir, Claude Code skills, and the PreToolUse hook",
+		Short: "Install mulix into a project: .mulix/, the mulix and superpowers Claude Code skills, and the PreToolUse hook",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			res, err := scaffold.Init(scaffold.InitOptions{Root: dir, Force: force})
 			if err != nil {
@@ -27,9 +27,7 @@ func newInitCmd() *cobra.Command {
 				fmt.Printf("  skipped %s (already present; use --force to overwrite)\n", s)
 			}
 			fmt.Println("mulix initialized. Run `mulix new \"<title>\"` to start your first change.")
-			if found, _ := scaffold.DetectSuperpowers(dir); !found {
-				fmt.Println("hint: the superpowers plugin wasn't detected. The build phase can delegate task execution to its writing-plans/subagent-driven-development/test-driven-development skill chain when it's installed — see the mulix-build skill for details.")
-			}
+			fmt.Println("note: the superpowers skills are installed as project skills in .claude/skills/. If the superpowers plugin is also enabled, disable it for this project so its SessionStart bootstrap and namespaced skills don't compete with mulix's phase gates.")
 			return nil
 		},
 	}

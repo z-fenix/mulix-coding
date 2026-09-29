@@ -1,0 +1,4 @@
+# Embedded superpowers skills are installed byte-for-byte by mulix init;
+# a CRLF checkout breaks their bash scripts (shebang + here-strings).
+assets/superpowers/** text eol=lf
+assets/superpowers/**/*.png binary

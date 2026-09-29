@@ -118,3 +118,38 @@ func TestPhaseValid(t *testing.T) {
 		t.Fatal("expected bogus phase to be invalid")
 	}
 }
+
+func TestTable_WalksSevenPhasesInOrder(t *testing.T) {
+	s := New("x", "")
+	path := []Event{EventSpecComplete, EventClarifyComplete, EventDesignApproved, EventTasksComplete, EventBuildComplete, EventVerifyPass}
+	want := []Phase{PhaseClarify, PhaseDesign, PhaseTasks, PhaseBuild, PhaseVerify, PhaseArchive}
+	for i, e := range path {
+		var err error
+		s, err = Apply(s, e)
+		if err != nil {
+			t.Fatalf("Apply(%s): %v", e, err)
+		}
+		if s.Phase != want[i] {
+			t.Fatalf("after %s: phase %q, want %q", e, s.Phase, want[i])
+		}
+	}
+	if len(Phases) != 7 {
+		t.Fatalf("expected 7 phases, got %v", Phases)
+	}
+}
+
+func TestNextEvents_DesignHasNoSkip(t *testing.T) {
+	events := NextEvents(PhaseDesign)
+	if len(events) != 1 || events[0] != EventDesignApproved {
+		t.Fatalf("expected only [design-approved] from design, got %v", events)
+	}
+}
+
+func TestClarifySkippedLeadsToDesign(t *testing.T) {
+	s := New("x", "")
+	s.Phase = PhaseClarify
+	next, err := Apply(s, EventClarifySkipped)
+	if err != nil || next.Phase != PhaseDesign {
+		t.Fatalf("expected clarify-skipped to reach design, got %q (%v)", next.Phase, err)
+	}
+}

@@ -1,20 +1,20 @@
 // Package guard implements the phase-exit readiness checks that gate
 // flow.Apply calls. Each check inspects the filesystem/state for concrete
-// evidence (an artifact exists and is non-empty, tasks.md is fully checked
-// off, a verification report was written) rather than trusting the agent's
-// say-so. Guards never mutate state; Run only reports pass/fail plus a
-// remediation hint.
+// evidence (an artifact exists and is non-empty, every task in tasks.md
+// has a completion line in the execution ledger, a verification report
+// was written) rather than trusting the agent's say-so. Guards never
+// mutate state; Run only reports pass/fail plus a remediation hint.
 package guard
 
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/mulix-dev/mulix-coding/internal/flow"
-	"github.com/mulix-dev/mulix-coding/internal/scaffold"
+	"github.com/mulix-dev/mulix-coding/internal/layout"
 )
 
 // Result is the outcome of one named check.
@@ -62,11 +62,9 @@ var checksByEvent = map[flow.Event][]checkFunc{
 	flow.EventSpecComplete:    {checkArtifactPresent("spec-artifact-present", func(s flow.State) string { return s.SpecPath })},
 	flow.EventClarifyComplete: {checkClarifyRecorded},
 	flow.EventClarifySkipped:  {checkClarifySkipAcknowledged},
-	flow.EventPlanComplete:    {checkArtifactPresent("plan-artifacts-present", func(s flow.State) string { return s.PlanPath })},
-	flow.EventTasksComplete:   {checkArtifactPresent("tasks-artifact-present", func(s flow.State) string { return s.TasksPath })},
-	flow.EventAnalyzeComplete: {checkArtifactPresent("analyze-report-present", func(s flow.State) string { return s.AnalyzePath })},
-	flow.EventAnalyzeSkipped:  {checkAnalyzeSkipAcknowledged},
-	flow.EventBuildComplete:   {checkTasksAllChecked, checkTddEvidencePresent},
+	flow.EventDesignApproved:  {checkDesignApproved},
+	flow.EventTasksComplete:   {checkTasksInChangeDir, checkTasksHaveSections},
+	flow.EventBuildComplete:   {checkExecutionMethodChosen, checkPlanTasksComplete, checkTddEvidencePresent},
 	flow.EventVerifyPass:      {checkArtifactPresent("verification-report-present", func(s flow.State) string { return s.ReportPath }), checkVerifyResultPass},
 	flow.EventVerifyFail:      {checkVerifyResultFail},
 	flow.EventArchived:        {checkArchiveConfirmed},
@@ -87,6 +85,14 @@ func Run(root string, s flow.State, event flow.Event) Report {
 
 // --- individual checks ---
 
+// resolve makes a state-recorded, root-relative path absolute.
+func resolve(root, p string) string {
+	if filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(root, filepath.FromSlash(p))
+}
+
 // checkArtifactPresent builds a check that verifies a state-recorded path
 // exists on disk and is non-empty.
 func checkArtifactPresent(name string, getPath func(flow.State) string) checkFunc {
@@ -95,11 +101,7 @@ func checkArtifactPresent(name string, getPath func(flow.State) string) checkFun
 		if p == "" {
 			return Result{Name: name, Pass: false, Next: fmt.Sprintf("%s: no path recorded in state yet.", name)}
 		}
-		full := p
-		if !filepath.IsAbs(full) {
-			full = filepath.Join(root, p)
-		}
-		info, err := os.Stat(full)
+		info, err := os.Stat(resolve(root, p))
 		if err != nil {
 			return Result{Name: name, Pass: false, Next: fmt.Sprintf("%s: %s does not exist yet.", name, p)}
 		}
@@ -114,11 +116,7 @@ func checkClarifyRecorded(root string, s flow.State) Result {
 	if s.SpecPath == "" {
 		return Result{Name: "clarify-recorded", Pass: false, Next: "No spec path recorded; cannot check for a Clarifications section."}
 	}
-	full := s.SpecPath
-	if !filepath.IsAbs(full) {
-		full = filepath.Join(root, full)
-	}
-	data, err := os.ReadFile(full)
+	data, err := os.ReadFile(resolve(root, s.SpecPath))
 	if err != nil {
 		return Result{Name: "clarify-recorded", Pass: false, Next: fmt.Sprintf("Could not read %s: %v", s.SpecPath, err)}
 	}
@@ -143,164 +141,241 @@ func checkClarifySkipAcknowledged(_ string, s flow.State) Result {
 	return Result{Name: "clarify-skip-acknowledged", Pass: true}
 }
 
-func checkAnalyzeSkipAcknowledged(_ string, s flow.State) Result {
-	if !s.AnalyzeSkipped {
-		return Result{
-			Name: "analyze-skip-acknowledged",
-			Pass: false,
-			Next: "Set analyze_skipped=true in state only after explicitly telling the human you are skipping the consistency analysis and why.",
-		}
-	}
-	return Result{Name: "analyze-skip-acknowledged", Pass: true}
-}
-
-func checkTasksAllChecked(root string, s flow.State) Result {
-	if s.TasksPath == "" {
-		return Result{Name: "tasks-all-checked", Pass: false, Next: "No tasks path recorded in state."}
-	}
-	full := s.TasksPath
-	if !filepath.IsAbs(full) {
-		full = filepath.Join(root, full)
-	}
-	data, err := os.ReadFile(full)
-	if err != nil {
-		return Result{Name: "tasks-all-checked", Pass: false, Next: fmt.Sprintf("Could not read %s: %v", s.TasksPath, err)}
-	}
-	unchecked := countUncheckedTaskLines(string(data))
-	if unchecked > 0 {
-		return Result{
-			Name: "tasks-all-checked",
-			Pass: false,
-			Next: fmt.Sprintf("%s still has %d unchecked task(s).", s.TasksPath, unchecked),
-		}
-	}
-	return Result{Name: "tasks-all-checked", Pass: true}
-}
-
-// countUncheckedTaskLines counts lines that are actually unchecked task
-// items ("- [ ]" at the start of a line, ignoring leading whitespace),
-// not every occurrence of that substring in the file. A naive substring
-// count over the whole file is fooled by templates/docs that mention the
-// checkbox syntax in prose (e.g. this package's own tasks-template.md
-// explains the "- [ ]" convention in a comment) — those aren't tasks and
-// must not block build-complete.
-func countUncheckedTaskLines(data string) int {
-	count := 0
-	for line := range strings.SplitSeq(data, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "- [ ]") {
-			count++
-		}
-	}
-	return count
-}
-
-// checkTddEvidencePresent verifies that every checked task in tasks.md
-// has an execution record: a non-empty task report at
-// <tasks dir>/.runtime/sdd/task_<ID>_report.md whose "### Task"
-// checklist shows the work actually done — at least one RED or GREEN
-// phase ticked ("- [x]"), and no RED or GREEN phase left as an open
-// "- [ ]" checkbox. REFACTOR is optional, so its checkbox state is
-// unconstrained; a test-writing task's report legitimately ticks only
-// its RED phase. tasks.md itself only describes the tasks (checkbox +
-// one-line description); the report is where the TDD phases live. This
-// is the structural half of the build phase's TDD discipline — the
-// mulix-build skill drives the cycle, and this check makes sure the
-// discipline left a trace before the change can advance to verify.
-func checkTddEvidencePresent(root string, s flow.State) Result {
-	const name = "tdd-evidence-present"
+// checkTasksHaveSections verifies tasks.md is an executable plan: at least
+// one "## Task N" section, numbered 1..n without gaps or duplicates. The
+// build phase's executors extract task briefs by that heading, and the
+// build-complete guard matches ledger lines to it.
+func checkTasksHaveSections(root string, s flow.State) Result {
+	const name = "tasks-have-task-sections"
 	if s.TasksPath == "" {
 		return Result{Name: name, Pass: false, Next: "No tasks path recorded in state."}
 	}
-	tasksFull := s.TasksPath
-	if !filepath.IsAbs(tasksFull) {
-		tasksFull = filepath.Join(root, s.TasksPath)
-	}
-	data, err := os.ReadFile(tasksFull)
+	data, err := os.ReadFile(resolve(root, s.TasksPath))
 	if err != nil {
 		return Result{Name: name, Pass: false, Next: fmt.Sprintf("Could not read %s: %v", s.TasksPath, err)}
 	}
-
-	sddDir := filepath.Join(filepath.Dir(filepath.ToSlash(s.TasksPath)), scaffold.RuntimeDirName, scaffold.RuntimeSddDirName)
-	var missing []string
-	for line := range strings.SplitSeq(string(data), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "- [x]") {
-			continue
-		}
-		id := taskIDOf(trimmed)
-		if id == trimmed {
-			// No T-number ID: there is no report filename to even look
-			// for, so the task cannot have left its execution record.
-			missing = append(missing, trimmed)
-			continue
-		}
-		reportPath := filepath.Join(sddDir, "task_"+id+"_report.md")
-		reportFull := filepath.Join(root, reportPath)
-		report, err := os.ReadFile(reportFull)
-		if err != nil {
-			missing = append(missing, id)
-			continue
-		}
-		if len(report) == 0 || phaseTickProblem(string(report)) != "" {
-			missing = append(missing, id)
-		}
+	tasks := TaskNumbers(string(data))
+	if len(tasks) == 0 {
+		return Result{Name: name, Pass: false, Next: fmt.Sprintf("%s has no \"## Task N: <name>\" sections. Every task is its own section, numbered from 1.", s.TasksPath)}
 	}
-	if len(missing) > 0 {
-		hint := fmt.Sprintf("%s has %d checked task(s) whose report is missing or shows unticked RED/GREEN phases, e.g. %q. Record the task's RED/GREEN/REFACTOR checklist in %s and tick each phase as it completes.", s.TasksPath, len(missing), missing[0], reportPathFor(sddDir, missing[0]))
-		if s.DelegatedToSubagents {
-			hint += " Delegating a task to a subagent does not exempt it — the dispatched subagent's report must still be there."
+	for i, n := range tasks {
+		if n != i+1 {
+			return Result{Name: name, Pass: false, Next: fmt.Sprintf("%s numbers its tasks %v; they must run 1..%d in order, each exactly once.", s.TasksPath, tasks, len(tasks))}
 		}
-		return Result{Name: name, Pass: false, Next: hint}
 	}
 	return Result{Name: name, Pass: true}
 }
 
-// phaseTickProblem inspects a task report's checkbox checklist and
-// returns "" when the report is acceptable: at least one ticked RED or
-// GREEN phase, and no RED or GREEN phase left unticked. REFACTOR is
-// optional, so an unticked "- [ ] REFACTOR:" line is fine.
-func phaseTickProblem(report string) string {
-	ticked := 0
-	for line := range strings.SplitSeq(report, "\n") {
-		trimmed := strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(trimmed, "- [x] RED:") || strings.HasPrefix(trimmed, "- [x] GREEN:"):
-			ticked++
-		case strings.HasPrefix(trimmed, "- [ ] RED:") || strings.HasPrefix(trimmed, "- [ ] GREEN:"):
-			return "unticked RED/GREEN phase"
+// checkTasksInChangeDir verifies tasks.md exists, is non-empty, and lives
+// in the change's own docs/changes/<change>/ directory — the one place the
+// tasks phase may write it.
+func checkTasksInChangeDir(root string, s flow.State) Result {
+	const name = "tasks-artifact-present"
+	if res := checkArtifactPresent(name, func(s flow.State) string { return s.TasksPath })(root, s); !res.Pass {
+		return res
+	}
+	want := path.Join(layout.ChangesDir, s.Change)
+	if !isUnder(path.Clean(filepath.ToSlash(s.TasksPath)), want) {
+		return Result{Name: name, Pass: false, Next: fmt.Sprintf("tasks_path %s is outside %s/.", s.TasksPath, want)}
+	}
+	return Result{Name: name, Pass: true}
+}
+
+// checkDesignApproved verifies the design phase's brainstorming reached
+// its gate: a classified track, an explicit human approval, and — for the
+// architectural track — a non-empty written design doc inside the
+// change's runtime specs directory.
+func checkDesignApproved(root string, s flow.State) Result {
+	const name = "design-approved"
+	if !s.DesignTrack.Valid() {
+		return Result{Name: name, Pass: false, Next: fmt.Sprintf("design_track is %q. Classify the change (bounded|architectural) out loud, then record it with `mulix state set design_track <track>`.", s.DesignTrack)}
+	}
+	if s.DesignTrack == flow.TrackArchitectural {
+		want := layout.ChangeRuntimePath(s.Change, layout.DesignDir)
+		if s.DesignPath == "" {
+			return Result{Name: name, Pass: false, Next: fmt.Sprintf("The architectural track needs a written design doc under %s/, recorded with `mulix state set design_path <path>`.", want)}
+		}
+		if !isUnder(path.Clean(filepath.ToSlash(s.DesignPath)), want) {
+			return Result{Name: name, Pass: false, Next: fmt.Sprintf("design_path %s is outside %s/.", s.DesignPath, want)}
+		}
+		info, err := os.Stat(resolve(root, s.DesignPath))
+		if err != nil || info.Size() == 0 {
+			return Result{Name: name, Pass: false, Next: fmt.Sprintf("Design doc %s is missing or empty.", s.DesignPath)}
 		}
 	}
-	if ticked == 0 {
-		return "no ticked RED/GREEN phase"
+	if !s.DesignApproved {
+		return Result{Name: name, Pass: false, Next: "design_approved is false. Present the design (in chat for bounded, the written spec for architectural), wait for an explicit yes, then `mulix state set design_approved true`."}
+	}
+	return Result{Name: name, Pass: true}
+}
+
+func checkExecutionMethodChosen(_ string, s flow.State) Result {
+	const name = "execution-method-chosen"
+	if !s.ExecutionMethod.Valid() {
+		return Result{Name: name, Pass: false, Next: fmt.Sprintf("execution_method is %q. At the start of build, recommend subagent-driven or inline, get the human's choice, then `mulix state set execution_method <method>`.", s.ExecutionMethod)}
+	}
+	return Result{Name: name, Pass: true}
+}
+
+// checkPlanTasksComplete verifies every "## Task N" section of tasks.md
+// has a "Task N: complete" line in the plan's execution ledger. The ledger
+// (progress.md in the plan's workspace under .mulix/.runtime/<change>/
+// sdd/) is written by the build phase's executor; its first line must name
+// tasks.md, so a ledger belonging to another plan never counts.
+func checkPlanTasksComplete(root string, s flow.State) Result {
+	const name = "plan-tasks-complete"
+	tasks, ws, res := loadPlanAndWorkspace(root, s, name)
+	if !res.Pass {
+		return res
+	}
+	ledger, err := os.ReadFile(filepath.Join(ws, "progress.md"))
+	if err != nil {
+		return Result{Name: name, Pass: false, Next: fmt.Sprintf("No ledger at %s. The build phase's executor writes one line per completed task there.", slashRel(root, filepath.Join(ws, "progress.md")))}
+	}
+	first, _, _ := strings.Cut(string(ledger), "\n")
+	if !strings.HasPrefix(strings.TrimSpace(first), "# SDD ledger") || !strings.HasSuffix(strings.TrimSpace(first), path.Base(filepath.ToSlash(s.TasksPath))) {
+		return Result{Name: name, Pass: false, Next: fmt.Sprintf("Ledger %s does not start with \"# SDD ledger — plan: %s\".", slashRel(root, filepath.Join(ws, "progress.md")), s.TasksPath)}
+	}
+	done := CompletedTasks(string(ledger))
+	var missing []int
+	for _, n := range tasks {
+		if !done[n] {
+			missing = append(missing, n)
+		}
+	}
+	if len(missing) > 0 {
+		return Result{Name: name, Pass: false, Next: fmt.Sprintf("%d of %d task(s) have no \"Task N: complete\" ledger line yet: %v.", len(missing), len(tasks), missing)}
+	}
+	return Result{Name: name, Pass: true}
+}
+
+// checkTddEvidencePresent verifies every task left a TDD trace: a
+// task-N-report.md in the plan's workspace carrying both a RED entry (the
+// failing run, before implementation) and a GREEN entry (the passing run
+// after). Both executors write it — the subagent-driven implementer by its
+// report contract, the inline executor per the mulix-build skill.
+func checkTddEvidencePresent(root string, s flow.State) Result {
+	const name = "tdd-evidence-present"
+	tasks, ws, res := loadPlanAndWorkspace(root, s, name)
+	if !res.Pass {
+		return res
+	}
+	var missing []string
+	for _, n := range tasks {
+		report := filepath.Join(ws, fmt.Sprintf("task-%d-report.md", n))
+		data, err := os.ReadFile(report)
+		if err != nil {
+			missing = append(missing, fmt.Sprintf("Task %d (no report)", n))
+			continue
+		}
+		if problem := tddEvidenceProblem(string(data)); problem != "" {
+			missing = append(missing, fmt.Sprintf("Task %d (%s)", n, problem))
+		}
+	}
+	if len(missing) > 0 {
+		return Result{Name: name, Pass: false, Next: fmt.Sprintf("%d task(s) lack TDD evidence in %s/task-N-report.md, e.g. %s. Each report needs a \"RED:\" line (failing command and output before implementing) and a \"GREEN:\" line (passing command and output after).", len(missing), slashRel(root, ws), missing[0])}
+	}
+	return Result{Name: name, Pass: true}
+}
+
+// tddEvidenceProblem returns "" when report records both TDD phases: a
+// line whose text (after list/emphasis markers) starts with "RED" and one
+// that starts with "GREEN", each followed by content.
+func tddEvidenceProblem(report string) string {
+	var red, green bool
+	for line := range strings.SplitSeq(report, "\n") {
+		t := strings.TrimLeft(strings.TrimSpace(line), "-*# ")
+		t = strings.TrimLeft(t, "*_")
+		switch {
+		case hasPhase(t, "RED"):
+			red = true
+		case hasPhase(t, "GREEN"):
+			green = true
+		}
+	}
+	switch {
+	case !red && !green:
+		return "no RED/GREEN evidence"
+	case !red:
+		return "no RED evidence"
+	case !green:
+		return "no GREEN evidence"
 	}
 	return ""
 }
 
-// reportPathFor names the expected report file for an offender in the
-// failure hint. For an ID-less task (the whole line is the "id") it
-// just points at the sdd directory.
-func reportPathFor(sddDir, id string) string {
-	if strings.HasPrefix(id, "T") || strings.HasPrefix(id, "t") {
-		return filepath.ToSlash(filepath.Join(sddDir, "task_"+id+"_report.md"))
+// hasPhase reports whether t is "<PHASE>" followed by a separator and some
+// content, e.g. "RED: go test ./... → FAIL ...".
+func hasPhase(t, phase string) bool {
+	rest, ok := strings.CutPrefix(t, phase)
+	if !ok {
+		return false
 	}
-	return filepath.ToSlash(sddDir) + "/task_<ID>_report.md"
+	rest = strings.TrimLeft(rest, "*_ ")
+	rest, ok = strings.CutPrefix(rest, ":")
+	if !ok {
+		rest, ok = strings.CutPrefix(rest, "—")
+	}
+	if !ok {
+		rest, ok = strings.CutPrefix(rest, "-")
+	}
+	return ok && strings.TrimSpace(strings.TrimLeft(rest, "*_")) != ""
 }
 
-// taskIDOf extracts the leading task ID (T001, T042, ...) from a task
-// line's description, falling back to the whole line when no ID matches —
-// tasks are required to carry IDs, but the hint should still be useful if
-// one doesn't.
-func taskIDOf(trimmedTaskLine string) string {
-	fields := strings.Fields(strings.TrimPrefix(trimmedTaskLine, "- [x]"))
-	if len(fields) > 0 && (strings.HasPrefix(fields[0], "T") || strings.HasPrefix(fields[0], "t")) {
-		if _, err := strconv.Atoi(strings.TrimPrefix(fields[0], "T")); err == nil {
-			return fields[0]
+// loadPlanAndWorkspace reads tasks.md's task numbers and locates its
+// execution workspace, reporting a failed Result under name if either is
+// unavailable.
+func loadPlanAndWorkspace(root string, s flow.State, name string) ([]int, string, Result) {
+	if s.TasksPath == "" {
+		return nil, "", Result{Name: name, Pass: false, Next: "No tasks path recorded in state."}
+	}
+	data, err := os.ReadFile(resolve(root, s.TasksPath))
+	if err != nil {
+		return nil, "", Result{Name: name, Pass: false, Next: fmt.Sprintf("Could not read %s: %v", s.TasksPath, err)}
+	}
+	tasks := TaskNumbers(string(data))
+	if len(tasks) == 0 {
+		return nil, "", Result{Name: name, Pass: false, Next: fmt.Sprintf("%s has no \"## Task N\" sections.", s.TasksPath)}
+	}
+	ws, ok := FindWorkspace(root, s)
+	if !ok {
+		return nil, "", Result{Name: name, Pass: false, Next: fmt.Sprintf("No execution workspace for %s under %s/. Run the build through the executor skill (it resolves the workspace with sdd-workspace).", s.TasksPath, layout.ChangeRuntimePath(s.Change, layout.SddDir))}
+	}
+	return tasks, ws, Result{Name: name, Pass: true}
+}
+
+// FindWorkspace returns the absolute path of tasks.md's plan workspace
+// under .mulix/.runtime/<change>/sdd/: the subdirectory whose plan-path
+// marker names tasks.md. The marker is git-root-relative (or absolute),
+// so it's compared by path suffix against the root-relative TasksPath. A
+// marker-less sdd/<tasks basename>/ is accepted as a fallback.
+func FindWorkspace(root string, s flow.State) (string, bool) {
+	base := filepath.Join(root, filepath.FromSlash(layout.ChangeRuntimePath(s.Change, layout.SddDir)))
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return "", false
+	}
+	want := path.Clean(filepath.ToSlash(s.TasksPath))
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
 		}
-		if _, err := strconv.Atoi(strings.TrimPrefix(fields[0], "t")); err == nil {
-			return fields[0]
+		marker, err := os.ReadFile(filepath.Join(base, e.Name(), "plan-path"))
+		if err != nil {
+			continue
+		}
+		got := path.Clean(filepath.ToSlash(strings.TrimSpace(string(marker))))
+		if got == want || strings.HasSuffix(got, "/"+want) {
+			return filepath.Join(base, e.Name()), true
 		}
 	}
-	return trimmedTaskLine
+	fallback := filepath.Join(base, strings.TrimSuffix(path.Base(want), ".md"))
+	if info, err := os.Stat(fallback); err == nil && info.IsDir() {
+		if _, err := os.Stat(filepath.Join(fallback, "plan-path")); os.IsNotExist(err) {
+			return fallback, true
+		}
+	}
+	return "", false
 }
 
 func checkVerifyResultPass(_ string, s flow.State) Result {
@@ -330,8 +405,23 @@ func checkArchiveConfirmed(_ string, s flow.State) Result {
 		return Result{
 			Name: "archive-confirmed",
 			Pass: false,
-			Next: "archive_confirmation is not 'confirmed'. Present the merge/PR/keep/discard menu and get an explicit human choice before archiving.",
+			Next: "archive_confirmation is not 'confirmed'. Present the merge/PR/keep menu and get an explicit human choice before archiving.",
 		}
 	}
 	return Result{Name: "archive-confirmed", Pass: true}
+}
+
+// isUnder reports whether rel is exactly prefix or nested under it,
+// segment-aware.
+func isUnder(rel, prefix string) bool {
+	prefix = strings.TrimSuffix(prefix, "/")
+	return rel == prefix || strings.HasPrefix(rel, prefix+"/")
+}
+
+// slashRel renders p relative to root with forward slashes, for hints.
+func slashRel(root, p string) string {
+	if rel, err := filepath.Rel(root, p); err == nil {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(p)
 }

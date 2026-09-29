@@ -32,9 +32,10 @@ with a clear message if it fails rather than guessing at credentials.
 
 ## Deduplicate before creating anything
 
-Each task line starts with a markdown checkbox and a task ID like `T001`,
-`T002`, etc. — strip the leading `- [ ]` (and any `[P]` / `[US#]` markers)
-to recover the ID and description.
+Each task is a `## Task N: <name>` section (ignore headings inside ```
+fences — those are example code, not tasks). Its issue ID is `T` plus N
+zero-padded to three digits (`## Task 1: Parser` → `T001`), and its
+description is the `<name>` part.
 
 Build the set of task IDs from `tasks.md` first. Then list existing
 issues and match titles against the pattern `\bT\d{3,}\b` (three or more
@@ -57,11 +58,13 @@ Mark each matched task ID as "already has an issue" and skip it later.
 
 For every task ID **not** already covered, create one issue with a
 canonical title `T001: <description>` (ID once, followed by the task
-description — e.g. `- [ ] T001 Create project structure` becomes
-`T001: Create project structure`):
+name — e.g. `## Task 1: Create project structure` becomes
+`T001: Create project structure`). The body is the task's section,
+from its heading up to the next `## Task` heading, written to a temp
+file (not pasted into the command line):
 
 ```
-gh issue create --title "T001: Create project structure" --body "From tasks.md (<tasks_path>)."
+gh issue create --title "T001: Create project structure" --body-file <tmp file>
 ```
 
 > **UNDER NO CIRCUMSTANCES** create issues in a repository that doesn't

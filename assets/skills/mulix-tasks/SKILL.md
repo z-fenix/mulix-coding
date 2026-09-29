@@ -1,59 +1,60 @@
 ---
 name: mulix-tasks
-description: Use when the active change is in the tasks phase, to break the plan into a dependency-ordered checklist before implementation.
+description: Use when the active change is in the tasks phase, after its design was approved and before any code is written.
 ---
 
 # Tasks phase
 
-Load plan.md (tech stack, structure) and spec.md (user stories with
-priorities) and generate `docs/changes/<change>/tasks.md`: an actionable,
-dependency-ordered checklist organized by user story so each story is an
-independently completable, independently testable increment.
+**REQUIRED SUB-SKILL:** invoke `writing-plans` now and follow it
+exactly. Its output is this change's `tasks.md`. This skill only adds
+what mulix needs around it.
 
-## Checklist format (required)
+## Inputs
 
-Every task MUST follow this exact form:
+- `docs/specs/<change>/spec.md` — the requirements authority.
+- The approved design: `design_path` from `mulix state show`
+  (architectural), or the in-chat design approved in the design phase
+  (bounded).
+- `.mulix/memory/constitution.md`, if it has real content — every task
+  must comply with its MUST principles; an unjustified violation is a
+  plan defect, fixed here, not in build.
 
-```
-- [ ] T001 [P] [US1] Description with file path
-```
+## Output: `docs/changes/<change>/tasks.md`
 
-- **Checkbox**: always `- [ ]`. Keep the syntax exact and don't write
-  that literal marker in prose elsewhere in this file — the
-  build-complete guard counts unchecked checkbox lines, and a stray
-  mention in an explanatory comment can get miscounted as a real task.
-- **Task ID**: sequential, `T001`, `T002`, ... in execution order.
-- **`[P]` marker**: only if the task is parallelizable — touches
-  different files and has no dependency on an incomplete task.
-- **`[Story]` label**: required for user-story-phase tasks
-  (`[US1]`/`[US2]`/...), absent for Setup/Foundational/Polish tasks.
-- **Description**: a clear action with an exact file path — vague
-  enough that "an LLM can't complete it without additional context" is a
-  failing task, not a passing one.
-- **One line per task, tasks only**: this file describes the work, it
-  does not record execution. The build phase writes per-task execution
-  records to `docs/changes/<change>/.runtime/sdd/task_<ID>_report.md`
-  (requirements briefs to `task_<ID>_brief.md`) instead of touching this
-  file. Keeping every task to a single line is what lets the
-  build-complete guard count checkboxes and match reports to task IDs
-  unambiguously.
+Write it exactly as writing-plans specifies — plan header, Global
+Constraints, Review Focus, then one section per task — with these
+mulix specifics:
 
-## Phase structure
+- **Header:** `**Spec:**` names `docs/specs/<change>/spec.md`, and
+  `**Design:**` the design doc (or "approved in chat" for bounded, with the
+  design's approach summarized under Architecture). Keep the "For agentic
+  workers" line; the build phase decides which executor runs it.
+- **Task headings:** `## Task N: <name>`, N = 1, 2, 3... in execution
+  order, no gaps, each exactly once. The build executors extract briefs by
+  this heading, and the guards match ledger lines and reports to it.
+- **Steps:** the RED → verify RED → GREEN → verify GREEN → commit order
+  writing-plans prescribes, with complete test and code blocks and
+  `Expected:` lines. The build phase's TDD evidence comes from these
+  steps.
+- `.mulix/templates/tasks-template.md` shows the resulting layout. If a
+  preset overrides it (`mulix preset resolve tasks-template`), follow the
+  override's structure — but the `## Task N` headings are not optional.
 
-- **Setup** — project initialization, shared infrastructure.
-- **Foundational** — blocking prerequisites that must complete before
-  any user story starts. Keep this to what's genuinely shared; anything
-  only one story needs belongs in that story's phase instead.
-- **One phase per user story**, in priority order (P1, P2, P3...). Within
-  a story: tests (if the project does TDD) → models → services →
-  interface → integration. Map each entity/contract from the plan to the
-  story that needs it; if something serves multiple stories, put it in
-  Setup or the earliest story instead of duplicating it.
-- **Polish** — cross-cutting concerns that don't belong to one story.
+A small bounded change is still a plan: one or two tasks is fine; the
+headings and steps are not.
 
-For a small bounded change with only one real user story, a single Phase
-3 is enough — don't invent P2/P3 phases that don't exist just to fill out
-the structure.
+## Review before the gate
+
+1. Run writing-plans' Self-Review and fix what it finds inline.
+2. Dispatch one plan reviewer with
+   `.claude/skills/writing-plans/plan-document-reviewer-prompt.md`
+   (plan = tasks.md, spec = spec.md). Fix every Issue it raises; its
+   Recommendations are advisory.
+3. Link tasks.md for the human and ask whether it captures what they
+   want. Wait for their answer; revise on feedback.
+
+There is no execution handoff here: don't ask how to execute and don't
+invoke an executor. The build phase asks.
 
 ## Advancing out of this phase
 
@@ -61,3 +62,6 @@ the structure.
 mulix state set tasks_path docs/changes/<change>/tasks.md
 mulix state transition tasks-complete
 ```
+
+The guard checks tasks.md exists inside `docs/changes/<change>/`, is
+non-empty, and has `## Task N` sections numbered 1..n.

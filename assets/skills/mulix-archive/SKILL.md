@@ -1,26 +1,31 @@
 ---
 name: mulix-archive
-description: Use when the active change is in the archive phase, after verification has passed, to close out the change with an explicit human decision.
+description: Use when the active change is in the archive phase, after verification has passed, to integrate the work with an explicit human decision.
 ---
 
 # Archive phase
 
-The PreToolUse hook blocks all writes in this phase — there is nothing
-left to produce, only a decision to make.
+**REQUIRED SUB-SKILL:** invoke `finishing-a-development-branch` and
+follow it: verify the suite is green, detect the environment, present
+its menu exactly as written (merge locally / push and open a PR / keep
+as-is — discarding only on an explicit request), and carry out the
+human's choice.
 
-Present the human with an explicit choice; never assume one from silence:
+The PreToolUse hook blocks Write/Edit in this phase; the finishing
+skill works through git commands, which are not gated. Commit the
+change's record before integrating: `docs/specs/<change>/`,
+`docs/changes/<change>/`, and `.mulix/.runtime/<change>/` (its state,
+design doc, and execution workspace — the visual-companion sessions are
+git-ignored).
 
-- **Merge** — merge the branch now.
-- **Open a PR** — open a pull request instead of merging directly.
-- **Keep** — leave the branch as-is, unmerged, for later.
-- **Discard** — abandon the branch/change entirely.
-
-Only after they choose, record it:
+Only after the human has chosen — never inferred from silence — record
+it:
 
 ```
 mulix state set archive_confirmation confirmed
 mulix state transition archived
 ```
 
-The guard requires `archive_confirmation=confirmed`; there is no path that
-reaches `archived` without it.
+The guard requires `archive_confirmation=confirmed`; there is no path
+that reaches `archived` without it. Archiving clears the active-change
+marker.

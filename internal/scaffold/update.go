@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/mulix-dev/mulix-coding/assets"
 )
 
 // UpdateResult classifies what update did to each file, so the CLI can
@@ -17,7 +15,8 @@ type UpdateResult struct {
 	Updated    []string // untouched since install; replaced by the new version
 	Merged     []string // locally modified; three-way merge applied cleanly
 	Conflicted []string // locally modified; merge left Git-style conflict markers
-	Skipped    []string // left alone (already current, or no baseline to merge against)
+	Removed    []string // no longer shipped and untouched since install; deleted
+	Skipped    []string // left alone (already current, no baseline to merge against, or modified obsolete file)
 }
 
 // UpdateOptions controls what update writes into a target project.
@@ -30,58 +29,89 @@ type UpdateOptions struct {
 	Force bool
 }
 
-// Update refreshes the bundled skills (.claude/skills/*/SKILL.md) and
-// templates (.mulix/templates/*) in a target project to the versions in
-// this mulix binary. Files the user hasn't touched are updated in place;
-// locally modified files are three-way merged against the baseline copy
-// recorded at install time (.mulix/.installed/), with real conflicts
-// left in the file as Git-style markers and reported. Files without a
-// baseline (installed by an older mulix) are skipped and reported —
-// guessing a merge base isn't safe.
+// Update refreshes every managed file (see managedFiles: mulix's skills,
+// the embedded superpowers skills with their scripts and prompts, and the
+// templates) in a target project to the versions in this mulix binary.
+// Files the user hasn't touched are updated in place; locally modified
+// files are three-way merged against the baseline copy recorded at
+// install time (.mulix/.installed/), with real conflicts left in the file
+// as Git-style markers and reported. Files without a baseline (installed
+// by an older mulix) are skipped and reported — guessing a merge base
+// isn't safe. Files this mulix no longer ships are removed if untouched.
 //
 // update does not touch .mulix/memory/constitution.md (a user-authored
 // document), .claude/settings.json (init's hook merge already handles
-// it), or .mulix/presets/ (deliberate overrides, not core content).
+// it), .mulix/presets/ (deliberate overrides, not core content), or
+// .mulix/.runtime/ (the changes' own records).
 func Update(opts UpdateOptions) (UpdateResult, error) {
 	var res UpdateResult
 
-	skills, err := fs.ReadDir(assets.Skills, "skills")
+	files, err := managedFiles()
 	if err != nil {
 		return res, err
 	}
-	for _, e := range skills {
-		if !e.IsDir() {
-			continue
-		}
-		data, err := fs.ReadFile(assets.Skills, "skills/"+e.Name()+"/SKILL.md")
-		if err != nil {
+	for _, f := range files {
+		if err := updateFile(&res, opts, f.Rel, string(f.Data)); err != nil {
 			return res, err
 		}
-		rel := ".claude/skills/" + e.Name() + "/SKILL.md"
-		if err := updateFile(&res, opts, rel, string(data)); err != nil {
-			return res, err
+		if f.Mode() != 0o644 {
+			// Keep scripts executable even after a merge rewrote them.
+			if err := os.Chmod(filepath.Join(opts.Root, filepath.FromSlash(f.Rel)), f.Mode()); err != nil {
+				return res, err
+			}
 		}
 	}
 
-	templates, err := fs.ReadDir(assets.Templates, "templates")
-	if err != nil {
-		return res, err
-	}
-	for _, e := range templates {
-		if e.IsDir() {
-			continue
-		}
-		data, err := fs.ReadFile(assets.Templates, "templates/"+e.Name())
-		if err != nil {
-			return res, err
-		}
-		rel := ".mulix/templates/" + e.Name()
-		if err := updateFile(&res, opts, rel, string(data)); err != nil {
+	for _, rel := range obsoleteFiles {
+		if err := removeObsolete(&res, opts, rel); err != nil {
 			return res, err
 		}
 	}
 
 	return res, nil
+}
+
+// removeObsolete deletes a file an older mulix installed and this one no
+// longer ships — only when it (and its baseline) still match exactly, so
+// a user's edits are never thrown away. Anything else is reported.
+func removeObsolete(res *UpdateResult, opts UpdateOptions, relPath string) error {
+	full := filepath.Join(opts.Root, filepath.FromSlash(relPath))
+	baseFull := baselinePath(opts.Root, relPath)
+	cur, err := os.ReadFile(full)
+	if os.IsNotExist(err) {
+		_ = os.Remove(baseFull)
+		return nil
+	} else if err != nil {
+		return err
+	}
+	base, err := os.ReadFile(baseFull)
+	if (err == nil && bytes.Equal(cur, base)) || opts.Force {
+		if err := os.Remove(full); err != nil {
+			return err
+		}
+		_ = os.Remove(baseFull)
+		removeEmptyParents(opts.Root, filepath.Dir(full))
+		removeEmptyParents(opts.Root, filepath.Dir(baseFull))
+		res.Removed = append(res.Removed, relPath)
+		return nil
+	}
+	res.Skipped = append(res.Skipped, relPath+" (no longer shipped, but locally modified; remove it by hand)")
+	return nil
+}
+
+// removeEmptyParents removes dir and its empty ancestors up to (not
+// including) root.
+func removeEmptyParents(root, dir string) {
+	root = filepath.Clean(root)
+	for dir = filepath.Clean(dir); dir != root && strings.HasPrefix(dir, root); dir = filepath.Dir(dir) {
+		entries, err := os.ReadDir(dir)
+		if err != nil || len(entries) > 0 {
+			return
+		}
+		if os.Remove(dir) != nil {
+			return
+		}
+	}
 }
 
 // updateFile brings one managed file up to the incoming (bundled)
@@ -169,10 +199,20 @@ func writeBoth(full, baseFull string, data []byte) error {
 
 // writeFile writes data to path, creating parent directories as needed.
 func writeFile(path string, data []byte) error {
+	return writeFileMode(path, data, 0o644)
+}
+
+// writeFileMode is writeFile with explicit permission bits. os.WriteFile
+// only applies the mode when creating the file, so an existing file is
+// chmod-ed too.
+func writeFileMode(path string, data []byte, mode fs.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	if err := os.WriteFile(path, data, mode); err != nil {
+		return err
+	}
+	return os.Chmod(path, mode)
 }
 
 // splitLines splits file content into merge3's line representation.

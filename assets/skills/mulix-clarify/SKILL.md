@@ -1,14 +1,14 @@
 ---
 name: mulix-clarify
-description: Use when the active change is in the clarify phase, to resolve ambiguity in the spec before planning begins.
+description: Use when the active change is in the clarify phase, to resolve ambiguity in the spec before design begins.
 ---
 
 # Clarify phase
 
 Goal: detect and reduce ambiguity or missing decision points in
 `spec.md`, and record the clarifications directly in the spec file. This
-is expected to run (and finish) before the plan phase — if you're
-skipping it for a small bounded change or a spike, say so explicitly and
+is expected to run (and finish) before the design phase — if you're
+skipping it for a small, already-unambiguous change, say so explicitly and
 warn that downstream rework risk goes up.
 
 ## Scan for ambiguity first
@@ -38,7 +38,7 @@ asking):
 
 For each Partial/Missing category, it's a candidate question — unless
 the answer wouldn't materially change implementation, or it's really a
-tech-stack/task-breakdown question that belongs in plan/tasks instead.
+design/task-breakdown question that belongs in design/tasks instead.
 
 ## Ask up to 5, one at a time
 

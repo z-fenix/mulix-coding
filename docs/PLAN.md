@@ -368,3 +368,31 @@ docs/changes/<NNN-slug>/
 
 - [x] `go build ./...`、`go vet ./...`、`gofmt -l .`、`go test ./... -count=1` 全绿。
 - [x] 端到端:重建二进制,临时项目实测——勾选任务无 report 时 build-complete 拒绝(提示 report 路径与勾选要求);写入含勾选 RED/GREEN 的 report 后通过。
+
+## Phase 13 — 流程重排为 7 阶段,superpowers 全量嵌入,运行产物统一到 .mulix/.runtime(已完成)
+
+用户要求:analyze → build 完全用 superpowers 的 brainstorming + test-driven-development,**完全嵌入** superpowers(含其执行产物),产物目录 `.mulix/.runtime`,不参考现有实现;原流程节点不必保留,可提更优方案由用户裁定。过程中用户追加:`mulix-using-mulix` 改名 `using-mulix`;tasks.md 改为 `## Task N` 标题风格;tasks 阶段调用 writing-plans 并取消其 Execution Handoff。
+
+### 决策(经用户确认)
+
+- **流程**:`specify → clarify → design → tasks → build → verify → archive`(7 阶段)。原 plan 与 analyze 合并为 design:design = brainstorming(bounded 聊天内设计 / architectural 书面设计文档),tasks = writing-plans 产出 tasks.md(+ plan-document-reviewer 评审),build = TDD + subagent-driven-development | executing-plans。plan.md/analyze.md 及其模板删除;跨产物一致性由 writing-plans 自审 + plan 评审子代理承担。spike 路径不适用(change 已有 spec)。
+- **执行方式**:writing-plans 的 Execution Handoff 删除;build 开始时推荐一种并由用户选择(subagent-driven | inline),`mulix state set execution_method`,build-complete guard 检查。
+- **嵌入方式**:superpowers 全部 14 个技能(整目录:SKILL.md + prompts/references/scripts)vendored 到 `assets/superpowers/`,`mulix init` 安装为项目技能 `.claude/skills/<name>/`(无 `superpowers:` 前缀),LICENSE/VERSION 装到 `.mulix/superpowers/`。不再检测/依赖 superpowers 插件(`DetectSuperpowers` 移除);init 提示若插件同时启用应对本项目禁用。
+- **`.mulix/.runtime` 承载全部运行数据**:`<change>/state.yaml`(state 从 `docs/changes/<c>/.runtime/` 迁出,schema 升为 `mulix.state.v2`,旧位置加载时给出明确报错)、`<change>/specs/`(设计文档)、`<change>/brainstorm/`(visual companion 会话,含 session key,git 忽略)、`<change>/sdd/tasks/`(台账/brief/report/测试日志/审查包,归档后保留)、`_shared/`(无活动 change 时的落点,如 diagnosing-superpowers)。
+
+### 改动范围
+
+- **`scripts/sync-superpowers.sh`**(新):从 superpowers 检出/插件目录重新 vendor;通用改写(`superpowers:x`→`x`,`.superpowers/`→`.mulix/.runtime/<change>/`,`docs/superpowers/specs|plans`→运行目录 / `docs/changes/<change>/`),脚本按 `.mulix/active` 解析 change;定点补丁(brainstorming 头部 mulix 说明、writing-plans `## Task N` + 删 Execution Handoff + 保存到 tasks.md、SDD/inline 收尾保留 workspace、server.cjs 固定版本号)每个必须恰好命中一次,上游漂移即失败;最后断言无残留上游路径。
+- **`internal/layout`**(新):集中定义所有路径常量,供 state/guard/hook/scaffold 共用。
+- **`internal/flow`**:7 阶段、`design-approved` 事件、去掉 plan/analyze 事件;State 去掉 PlanPath/AnalyzePath/AnalyzeSkipped/DelegatedToSubagents,新增 DesignTrack/DesignPath/DesignApproved/ExecutionMethod。
+- **`internal/guard`**:`design-approved`(track 已分类 + 显式批准 + architectural 须有位于 `.mulix/.runtime/<c>/specs/` 的非空设计文档)、`tasks-have-task-sections`(`## Task N` 1..n 连续,忽略代码围栏内标题)、`tasks-artifact-present`(须位于 `docs/changes/<c>/`)、`execution-method-chosen`、`plan-tasks-complete`(workspace 按 plan-path 标记定位,台账首行须指向 tasks.md,每个 Task N 有 `Task N: complete` 行)、`tdd-evidence-present`(每个 `task-N-report.md` 有非空 RED 与 GREEN 证据行)。旧的 checkbox 计数与 `### Task` 勾选检测移除。
+- **`internal/hook`**:`.mulix/.runtime/` 规则——state.yaml 任何阶段不可写;他人 change 的运行目录不可写;`_shared/` 始终可写;design 阶段仅可写 `specs/`、`brainstorm/`,build 阶段仅可写 `sdd/`。design 阶段不可写 docs/;tasks/verify 写 `docs/changes/<c>/`。
+- **`internal/scaffold`**:`managedFiles()` 统一 init/update 的托管文件集(mulix 技能 + 全部 superpowers 技能目录 + 模板),`#!` 脚本以 0755 安装且 update 后保持;init 写 `.mulix/.runtime/.gitignore`;update 删除未改动的废弃文件(mulix-using-mulix/mulix-plan/mulix-analyze 及 plan/analyze 模板),已改动的只报告。`mulix new` 同时创建 `.mulix/.runtime/<c>/`。
+- **技能/模板**:新增 `mulix-design`;重写 `mulix-tasks`(调用 writing-plans,无 handoff)、`mulix-build`(选执行方式 → TDD + 执行器,workspace/report 约定,收尾不进 finishing,由 archive 负责)、`mulix-verify`(verification-before-completion,审查 Rulings)、`mulix-archive`(finishing-a-development-branch);`mulix-specify` 去掉分档(移到 design);`using-mulix` 重写(阶段↔技能对照表、嵌入技能规则);`mulix-taskstoissues` 按 `## Task N` 解析;`tasks-template.md` 改为 writing-plans 计划格式。
+
+### 验证
+
+- [x] `go build ./...`、`go vet ./...`、`gofmt -l .`、`go test ./... -count=1` 全绿。
+- [x] `scripts/smoke-e2e.sh`(新):临时 git 仓库里 init → new → 7 阶段全走通,逐阶段断言 hook allow/deny、guard 拒绝/放行,并真实执行嵌入的 `sdd-workspace`/`task-brief`/`task-done`(workspace 落在 `.mulix/.runtime/<c>/sdd/tasks/`,围栏内 `## Task 9` 不被当成任务),校验 brainstorm 会话被 git 忽略、state.yaml 不被忽略。
+- [x] 手动:embedded `start-server.sh --project-dir` 实际启动,会话目录落在 `.mulix/.runtime/<c>/brainstorm/`,`git status --ignored` 显示为忽略。
+- 未做:`examples/todo-cli` 仍是旧 8 阶段流程的产物(state v1、checkbox tasks.md、`docs/changes/<c>/.runtime/sdd/`),未按新流程重跑——需真实走一遍 design/tasks/build 才有意义,留待用户决定。
