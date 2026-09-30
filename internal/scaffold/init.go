@@ -8,8 +8,8 @@ import (
 	"path"
 	"path/filepath"
 
-	"github.com/mulix-dev/mulix-coding/assets"
-	"github.com/mulix-dev/mulix-coding/internal/layout"
+	"github.com/z-fenix/mulix-coding/assets"
+	"github.com/z-fenix/mulix-coding/internal/layout"
 )
 
 // InitOptions controls what mulix init writes into a target project.

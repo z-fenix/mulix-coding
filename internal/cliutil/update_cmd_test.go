@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mulix-dev/mulix-coding/assets"
+	"github.com/z-fenix/mulix-coding/assets"
 )
 
 func bundledSkill(t *testing.T, name string) string {

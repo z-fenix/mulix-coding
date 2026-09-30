@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mulix-dev/mulix-coding/internal/scaffold"
+	"github.com/z-fenix/mulix-coding/internal/scaffold"
 )
 
 func newInitCmd() *cobra.Command {

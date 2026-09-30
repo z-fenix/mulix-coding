@@ -6,7 +6,7 @@ import (
 	"path"
 	"sort"
 
-	"github.com/mulix-dev/mulix-coding/assets"
+	"github.com/z-fenix/mulix-coding/assets"
 )
 
 // managedFile is one file mulix installs into a project and keeps up to

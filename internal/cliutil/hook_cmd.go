@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mulix-dev/mulix-coding/internal/hook"
-	"github.com/mulix-dev/mulix-coding/internal/state"
+	"github.com/z-fenix/mulix-coding/internal/hook"
+	"github.com/z-fenix/mulix-coding/internal/state"
 )
 
 // newHookCmd wires the Claude Code PreToolUse hook entry point: read the

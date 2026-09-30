@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mulix-dev/mulix-coding/internal/layout"
+	"github.com/z-fenix/mulix-coding/internal/layout"
 )
 
 // ErrNoRoot is returned by FindRoot when no .mulix directory is found

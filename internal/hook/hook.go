@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mulix-dev/mulix-coding/internal/flow"
-	"github.com/mulix-dev/mulix-coding/internal/layout"
+	"github.com/z-fenix/mulix-coding/internal/flow"
+	"github.com/z-fenix/mulix-coding/internal/layout"
 )
 
 // ToolInput is the subset of Claude Code's tool_input payload mulix reads.

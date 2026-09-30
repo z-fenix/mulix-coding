@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mulix-dev/mulix-coding/internal/flow"
-	"github.com/mulix-dev/mulix-coding/internal/state"
+	"github.com/z-fenix/mulix-coding/internal/flow"
+	"github.com/z-fenix/mulix-coding/internal/state"
 )
 
 // saveStateForTest writes s directly via the state package, bypassing the

@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mulix-dev/mulix-coding/internal/layout"
+	"github.com/z-fenix/mulix-coding/internal/layout"
 )
 
 // SpecsDir and ChangesDir re-export internal/layout's names so existing

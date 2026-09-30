@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mulix-dev/mulix-coding/internal/flow"
+	"github.com/z-fenix/mulix-coding/internal/flow"
 )
 
 func TestRun_SpecCompleteFailsWhenArtifactMissing(t *testing.T) {

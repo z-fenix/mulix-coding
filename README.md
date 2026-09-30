@@ -207,7 +207,7 @@ go test ./...
 ./scripts/sync-superpowers.sh <superpowers-dir>   # re-vendor superpowers
 ```
 
-Module: `github.com/mulix-dev/mulix-coding`, Go 1.27.
+Module: `github.com/z-fenix/mulix-coding`, Go 1.27.
 
 ## Build, install, release
 

@@ -8,9 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mulix-dev/mulix-coding/internal/flow"
-	"github.com/mulix-dev/mulix-coding/internal/guard"
-	"github.com/mulix-dev/mulix-coding/internal/state"
+	"github.com/z-fenix/mulix-coding/internal/flow"
+	"github.com/z-fenix/mulix-coding/internal/guard"
+	"github.com/z-fenix/mulix-coding/internal/state"
 )
 
 // Version is set by the build (see cmd/mulix/main.go); kept here so the

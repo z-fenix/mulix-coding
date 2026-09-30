@@ -13,7 +13,7 @@
 
 ## Phase 0 — 项目骨架(已完成)
 
-- [x] `go.mod`(module `github.com/mulix-dev/mulix-coding`)
+- [x] `go.mod`(module `github.com/z-fenix/mulix-coding`)
 - [x] 目录骨架:`cmd/mulix`、`internal/{flow,state,guard,hook,scaffold,cliutil}`、`assets/{skills,templates}`
 
 ## Phase 1 — 核心状态机与强流程控制(代码已完成,待接入 CLI)

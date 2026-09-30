@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-REPO="https://github.com/mulix-dev/mulix-coding"
+REPO="https://github.com/z-fenix/mulix-coding"
 VERSION=""
 PREFIX="${HOME}/.local/bin"
 SOURCE=""

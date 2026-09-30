@@ -1,4 +1,4 @@
-module github.com/mulix-dev/mulix-coding
+module github.com/z-fenix/mulix-coding
 
 go 1.27.0
 

@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mulix-dev/mulix-coding/internal/state"
+	"github.com/z-fenix/mulix-coding/internal/state"
 )
 
 func newStatusCmd() *cobra.Command {

@@ -13,8 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mulix-dev/mulix-coding/internal/flow"
-	"github.com/mulix-dev/mulix-coding/internal/layout"
+	"github.com/z-fenix/mulix-coding/internal/flow"
+	"github.com/z-fenix/mulix-coding/internal/layout"
 )
 
 // Result is the outcome of one named check.

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mulix-dev/mulix-coding/internal/cliutil"
+	"github.com/z-fenix/mulix-coding/internal/cliutil"
 )
 
 // version is overridden at build time via -ldflags, e.g.:

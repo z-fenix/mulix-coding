@@ -9,9 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mulix-dev/mulix-coding/assets"
-	"github.com/mulix-dev/mulix-coding/internal/preset"
-	"github.com/mulix-dev/mulix-coding/internal/state"
+	"github.com/z-fenix/mulix-coding/assets"
+	"github.com/z-fenix/mulix-coding/internal/preset"
+	"github.com/z-fenix/mulix-coding/internal/state"
 )
 
 // isLocalDir reports whether source names an existing directory, used by
