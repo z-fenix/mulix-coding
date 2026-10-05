@@ -20,6 +20,12 @@ type InitOptions struct {
 	// differ from what mulix would write. Without Force, existing files
 	// are left alone and reported as skipped.
 	Force bool
+	// Hosts selects the agent hosts to install skills for (claude, dsh).
+	// The zero value keeps the historical default, Claude Code alone.
+	// The PreToolUse hook is installed for Claude Code only; the AGENTS.md
+	// bootstrap section is written for DeepSeek Harness only. The
+	// host-independent scaffolding (.mulix/) is written either way.
+	Hosts []Host
 }
 
 // InitResult reports what Init actually did, so the CLI can print a
@@ -36,14 +42,21 @@ type InitResult struct {
 const runtimeGitignore = "# Written by mulix init.\n*/" + layout.BrainstormDir + "/\n/" + layout.Shared + "/\n"
 
 // Init materializes .mulix/ (templates, shared constitution, the runtime
-// directory), .claude/skills/ (mulix's phase skills plus every embedded
-// superpowers skill), and the PreToolUse hook entry in
-// .claude/settings.json. It does not create docs/changes/ or docs/specs/
-// — those come from `mulix new`, once there's an actual change to hold.
-// It is idempotent: re-running without --force only fills in what's
-// missing.
+// directory), the phase skills plus every embedded superpowers skill into
+// each selected host's project skills directory (.claude/skills/ for
+// Claude Code, .dsh/skills/ for DeepSeek Harness), the PreToolUse hook
+// entry in .claude/settings.json for Claude Code, and a bootstrap section
+// in AGENTS.md for DeepSeek Harness. It does not create docs/changes/ or
+// docs/specs/ — those come from `mulix new`, once there's an actual
+// change to hold. It is idempotent: re-running without --force only
+// fills in what's missing.
 func Init(opts InitOptions) (InitResult, error) {
 	var res InitResult
+
+	hosts, err := normalizeHosts(opts.Hosts)
+	if err != nil {
+		return res, err
+	}
 
 	if err := writeIfAbsentOrForced(&res, opts, ".mulix/memory/constitution.md", 0o644, func() ([]byte, error) {
 		return fs.ReadFile(assets.Templates, "templates/constitution-template.md")
@@ -51,7 +64,7 @@ func Init(opts InitOptions) (InitResult, error) {
 		return res, err
 	}
 
-	files, err := managedFiles()
+	files, err := managedFiles(hosts)
 	if err != nil {
 		return res, fmt.Errorf("scaffold: reading bundled content: %w", err)
 	}
@@ -67,8 +80,29 @@ func Init(opts InitOptions) (InitResult, error) {
 		return res, err
 	}
 
-	if err := installClaudeHooks(&res, opts); err != nil {
-		return res, err
+	for _, h := range hosts {
+		if !h.installsHook() {
+			continue
+		}
+		if err := installClaudeHooks(&res, opts); err != nil {
+			return res, err
+		}
+	}
+
+	for _, h := range hosts {
+		if !h.writesBootstrap() {
+			continue
+		}
+		changed, err := mergeAgentsBootstrap(opts.Root, h.skillsDir())
+		if err != nil {
+			return res, err
+		}
+		label := agentsBootstrapFile + " (mulix section)"
+		if changed {
+			res.Written = append(res.Written, label)
+		} else {
+			res.Skipped = append(res.Skipped, label+" (already current)")
+		}
 	}
 
 	return res, nil

@@ -23,6 +23,8 @@ Code**. It borrows from four existing projects:
 compression engine/BM25/browse infrastructure, no comet Native
 workflow/dashboard, no spec-kit self-update. See [`docs/PLAN.md`](docs/PLAN.md)
 for the full phase breakdown and what's explicitly out of scope.
+DeepSeek Harness was added later as a second agent host (Phase 14) —
+see [Install into a project](#install-into-a-project).
 
 mulix does port spec-kit's **preset** system (a template-override stack)
 and **taskstoissues** (GitHub issue conversion) — see below.
@@ -73,7 +75,8 @@ Two independent mechanisms enforce phase gating from that state:
 All fourteen [superpowers](https://github.com/obra/superpowers) skills
 are vendored into `assets/superpowers/` (MIT; license and version
 installed to `.mulix/superpowers/`) and installed by `mulix init` as
-plain project skills in `.claude/skills/<name>/` — whole directories,
+plain project skills in the host's skills directory (`.claude/skills/`
+on Claude Code, `.dsh/skills/` on DeepSeek Harness) — whole directories,
 with their prompt templates, references, and scripts. mulix doesn't
 detect or require the superpowers plugin; if it's also enabled, disable
 it for mulix projects so its bootstrap and namespaced copies don't
@@ -97,16 +100,49 @@ mulix init
 
 This writes `.mulix/` (shared constitution, bundled templates, the
 superpowers license/version, `.mulix/.runtime/.gitignore`, and the
-`active`-change marker once a change exists), `.claude/skills/` (one
-`mulix-*` skill per phase, the `using-mulix` bootstrap skill, and every
-embedded superpowers skill), and merges a `PreToolUse` hook entry into
-`.claude/settings.json` without disturbing any hooks/settings you
-already have. It does not create `docs/specs/` or `docs/changes/` —
-those come from `mulix new`, once there's an actual change to hold.
-Re-running `mulix init` is safe (it skips files that already exist);
-`mulix update` refreshes installed files after an upgrade, three-way
-merging local edits and removing files this version no longer ships if
-they're untouched.
+`active`-change marker once a change exists), the skills for the
+selected agent hosts, and — for Claude Code — merges a `PreToolUse`
+hook entry into `.claude/settings.json` without disturbing any
+hooks/settings you already have. It does not create `docs/specs/` or
+`docs/changes/` — those come from `mulix new`, once there's an actual
+change to hold. Re-running `mulix init` is safe (it skips files that
+already exist); `mulix update` refreshes installed files after an
+upgrade, three-way merging local edits and removing files this version
+no longer ships if they're untouched.
+
+### Agent hosts
+
+Skills are installed per host, selected with a repeatable
+comma-separated flag (default `claude`):
+
+```
+mulix init                     # Claude Code only (historical default)
+mulix init --host dsh          # DeepSeek Harness only
+mulix init --host claude,dsh   # both
+```
+
+| Host | Skills directory | Enforcement | Bootstrap |
+|------|------------------|-------------|-----------|
+| `claude` (Claude Code) | `.claude/skills/` | PreToolUse hook + guards | — |
+| `dsh` (DeepSeek Harness) | `.dsh/skills/` | guards only (no hook equivalent) | mulix section merged into `AGENTS.md` |
+
+Both hosts receive the same skill set: the `mulix-*` phase skills,
+the `using-mulix` bootstrap skill, and every embedded superpowers
+skill. mulix's own skills are written per host — wherever they state
+the project skills directory they name the installing host's
+directory. The `.dsh/skills/` root is DeepSeek Harness's
+highest-priority local discovery root, and the harness loads the
+project's `AGENTS.md` every session; the merged mulix section states
+the phase discipline that the hook enforces on Claude Code, because on
+this host nothing technical blocks an out-of-phase write — the guard
+checks inside `mulix state transition` are the enforcement.
+
+`mulix update` keeps every host tree the project installed (it derives
+them from the baseline copies under `.mulix/.installed/`), so a
+claude-only project never grows a `.dsh/skills/` tree, and a dsh
+project's `AGENTS.md` section is refreshed together with the skills.
+To add a host to an existing project, re-run `mulix init --host dsh`
+(idempotent — it fills in only what's missing).
 
 ## Everyday commands
 

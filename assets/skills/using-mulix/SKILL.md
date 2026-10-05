@@ -22,9 +22,11 @@ specify → clarify → design → tasks → build → verify → archive
 | verify  | `mulix-verify`  | `verification-before-completion`                | `docs/changes/<change>/report.md` |
 | archive | `mulix-archive` | `finishing-a-development-branch`                | merged / PR / kept |
 
-1. A **PreToolUse hook** blocks `Write`/`Edit` calls that don't match the
-   current phase's whitelist. If a write gets blocked, the message says
-   why and what to do next — read it, don't retry the same call.
+1. On Claude Code, a **PreToolUse hook** blocks `Write`/`Edit` calls
+   that don't match the current phase's whitelist. If a write gets
+   blocked, the message says why and what to do next — read it, don't
+   retry the same call. Hosts without the hook (such as DeepSeek
+   Harness) have no automatic layer here: the whitelist still binds you.
 2. **Guard checks** (`mulix guard <event>`, run automatically inside
    `mulix state transition <event>`) verify concrete evidence (an
    artifact exists, the design approval is recorded, every task has a
@@ -45,7 +47,7 @@ phase.
 ## The embedded superpowers skills
 
 `mulix init` installs every superpowers skill as a project skill in
-`.claude/skills/` (unprefixed: `brainstorming`, not
+`{{SKILLS_DIR}}/` (unprefixed: `brainstorming`, not
 `superpowers:brainstorming`). They keep their full discipline; mulix
 only moves their artifacts under `.mulix/.runtime/` and replaces their
 hand-offs with phase gates:
@@ -73,8 +75,9 @@ hand first.
 ## Red flags — stop and reconsider
 
 - "I'll just write the code first and backfill the phase later" — this
-  is exactly what the PreToolUse hook exists to prevent. If it blocks
-  you, that's it working correctly, not a bug to route around.
+  is exactly what the phase gates exist to prevent: the hook on Claude
+  Code, the guards and this discipline on every host. Routing around
+  them is a bug, not a shortcut.
 - "brainstorming says to invoke writing-plans / the plan says to execute
   now" — under mulix the next step is always the phase gate. Transition,
   then the next phase's skill takes over.

@@ -11,8 +11,10 @@ its menu exactly as written (merge locally / push and open a PR / keep
 as-is — discarding only on an explicit request), and carry out the
 human's choice.
 
-The PreToolUse hook blocks Write/Edit in this phase; the finishing
-skill works through git commands, which are not gated. Commit the
+This phase writes nothing. On Claude Code the PreToolUse hook blocks
+Write/Edit here; on hosts without the hook the rule still binds — treat
+every project write as out of bounds. The finishing skill works through
+git commands, which were never gated. Commit the
 change's record before integrating: `docs/specs/<change>/`,
 `docs/changes/<change>/`, and `.mulix/.runtime/<change>/` (its state,
 design doc, and execution workspace — the visual-companion sessions are

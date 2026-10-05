@@ -15,13 +15,15 @@ func newUpdateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update",
 		Short: "Update bundled skills and templates in this project, three-way merging local edits",
-		Long: "Refresh the mulix and embedded superpowers skills (.claude/skills/*/**) and templates " +
-			"(.mulix/templates/*) installed in this project to the versions bundled " +
-			"with this mulix binary. Files untouched since install are updated in " +
-			"place; locally modified files are three-way merged against the baseline " +
-			"copy recorded at install time, and real conflicts are left in the file " +
-			"as Git-style markers and reported. Files installed without a baseline " +
-			"(by an older mulix) are skipped and reported.",
+		Long: "Refresh the mulix and embedded superpowers skills (.claude/skills/*/**, " +
+			"plus .dsh/skills/*/** when this project installed them for DeepSeek " +
+			"Harness) and templates (.mulix/templates/*) installed in this project " +
+			"to the versions bundled with this mulix binary. Files untouched since " +
+			"install are updated in place; locally modified files are three-way " +
+			"merged against the baseline copy recorded at install time, and real " +
+			"conflicts are left in the file as Git-style markers and reported. " +
+			"Files installed without a baseline (by an older mulix) are skipped " +
+			"and reported.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := state.FindRoot(".")
 			if err != nil {

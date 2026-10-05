@@ -27,15 +27,29 @@ func runPresetCLI(t *testing.T, args ...string) (string, error) {
 	}
 	os.Stdout = w
 
+	// Drain the pipe while the command runs. init prints one line per
+	// managed file, which can exceed the pipe buffer; a blocked writer
+	// would deadlock the test, since the reader below only runs after
+	// Execute returns.
+	type readResult struct {
+		out []byte
+		err error
+	}
+	read := make(chan readResult, 1)
+	go func() {
+		out, err := io.ReadAll(r)
+		read <- readResult{out, err}
+	}()
+
 	runErr := cmd.Execute()
 
 	w.Close()
 	os.Stdout = origStdout
-	out, readErr := io.ReadAll(r)
-	if readErr != nil {
-		t.Fatalf("reading captured stdout: %v", readErr)
+	captured := <-read
+	if captured.err != nil {
+		t.Fatalf("reading captured stdout: %v", captured.err)
 	}
-	return string(out), runErr
+	return string(captured.out), runErr
 }
 
 // chdirTemp creates a temp dir, chdirs into it, and restores the original

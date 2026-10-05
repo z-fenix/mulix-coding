@@ -47,7 +47,7 @@ headings and steps are not.
 
 1. Run writing-plans' Self-Review and fix what it finds inline.
 2. Dispatch one plan reviewer with
-   `.claude/skills/writing-plans/plan-document-reviewer-prompt.md`
+   `{{SKILLS_DIR}}/writing-plans/plan-document-reviewer-prompt.md`
    (plan = tasks.md, spec = spec.md). Fix every Issue it raises; its
    Recommendations are advisory.
 3. Link tasks.md for the human and ask whether it captures what they

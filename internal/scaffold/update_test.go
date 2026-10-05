@@ -1,12 +1,15 @@
 package scaffold
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/z-fenix/mulix-coding/assets"
 )
 
 // writeProjectFile writes relPath (slash-separated) under root.
@@ -259,5 +262,133 @@ func TestUpdate_RemovesUntouchedObsoleteFileKeepsModifiedOne(t *testing.T) {
 	}
 	if len(res.Removed) != 1 {
 		t.Fatalf("expected exactly one removal, got %+v", res.Removed)
+	}
+}
+
+func TestUpdate_DerivesDSHHostFromBaselines(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Init(InitOptions{Root: root, Hosts: []Host{HostDSH}}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Simulate an install by an older mulix: the bundled skill minus its
+	// last line, with the baseline recording exactly that. Untouched on
+	// disk, so update replaces it in place.
+	bundledData, err := fs.ReadFile(assets.Skills, "skills/mulix-build/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundled := string(bundledData)
+	lines := strings.Split(strings.TrimSuffix(bundled, "\n"), "\n")
+	oldVersion := strings.Join(lines[:len(lines)-1], "\n") + "\n"
+	staleRel := ".dsh/skills/mulix-build/SKILL.md"
+	writeProjectFile(t, root, staleRel, oldVersion)
+	writeProjectFile(t, root, ".mulix/.installed/"+staleRel, oldVersion)
+
+	// And a deleted skill file: update rewrites it from the bundle.
+	missingRel := ".dsh/skills/mulix-specify/SKILL.md"
+	if err := os.Remove(filepath.Join(root, filepath.FromSlash(missingRel))); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Update(UpdateOptions{Root: root})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if got := readProjectFile(t, root, staleRel); got != bundled {
+		t.Error("expected the stale dsh skill to be refreshed to the bundled version")
+	}
+	bundledSpecify, err := fs.ReadFile(assets.Skills, "skills/mulix-specify/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := readProjectFile(t, root, missingRel); got != string(bundledSpecify) {
+		t.Error("expected the deleted dsh skill to be rewritten from the bundle")
+	}
+	reportedUpdated := false
+	reportedWritten := false
+	for _, u := range res.Updated {
+		if strings.HasPrefix(u, ".dsh/skills/") {
+			reportedUpdated = true
+		}
+	}
+	for _, w := range res.Written {
+		if strings.HasPrefix(w, ".dsh/skills/") {
+			reportedWritten = true
+		}
+	}
+	if !reportedUpdated || !reportedWritten {
+		t.Fatalf("expected dsh files in the updated and written reports, updated=%v written=%v", res.Updated, res.Written)
+	}
+
+	// The AGENTS.md section is refreshed as part of the same update. Right
+	// after init it is already current, so it reports as skipped rather
+	// than updated — it must be reported in one of the two.
+	reportedAgents := false
+	for _, u := range res.Updated {
+		if strings.HasPrefix(u, "AGENTS.md") {
+			reportedAgents = true
+		}
+	}
+	for _, s := range res.Skipped {
+		if strings.HasPrefix(s, "AGENTS.md") {
+			reportedAgents = true
+		}
+	}
+	if !reportedAgents {
+		t.Fatalf("expected the AGENTS.md section to be reported, updated=%v skipped=%v", res.Updated, res.Skipped)
+	}
+}
+
+func TestUpdate_ClaudeOnlyProjectNeverGetsDSH(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Init(InitOptions{Root: root}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	res, err := Update(UpdateOptions{Root: root})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	for _, rel := range []string{".dsh/skills/using-mulix/SKILL.md", "AGENTS.md"} {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); !os.IsNotExist(err) {
+			t.Errorf("expected update to not create %s in a claude-only project", rel)
+		}
+	}
+	for _, w := range res.Written {
+		if strings.HasPrefix(w, ".dsh/") || strings.HasPrefix(w, "AGENTS.md") {
+			t.Errorf("unexpected dsh write in a claude-only project: %s", w)
+		}
+	}
+}
+
+func TestUpdate_RefreshesStaleAgentsSection(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Init(InitOptions{Root: root, Hosts: []Host{HostDSH}}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	// The user (or an older mulix) mangled the section body.
+	agents := readProjectFile(t, root, "AGENTS.md")
+	stale := strings.Replace(agents, "`mulix state show`", "`mulix state show --stale`", 1)
+	if stale == agents {
+		t.Fatal("test setup failed to mangle the section")
+	}
+	writeProjectFile(t, root, "AGENTS.md", stale)
+
+	res, err := Update(UpdateOptions{Root: root})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if got := readProjectFile(t, root, "AGENTS.md"); got != agents {
+		t.Fatalf("expected the section to be restored, got:\n%s", got)
+	}
+	found := false
+	for _, u := range res.Updated {
+		if strings.HasPrefix(u, "AGENTS.md") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected the AGENTS.md section in the updated report, got %+v", res.Updated)
 	}
 }

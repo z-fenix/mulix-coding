@@ -396,3 +396,46 @@ docs/changes/<NNN-slug>/
 - [x] `scripts/smoke-e2e.sh`(新):临时 git 仓库里 init → new → 7 阶段全走通,逐阶段断言 hook allow/deny、guard 拒绝/放行,并真实执行嵌入的 `sdd-workspace`/`task-brief`/`task-done`(workspace 落在 `.mulix/.runtime/<c>/sdd/tasks/`,围栏内 `## Task 9` 不被当成任务),校验 brainstorm 会话被 git 忽略、state.yaml 不被忽略。
 - [x] 手动:embedded `start-server.sh --project-dir` 实际启动,会话目录落在 `.mulix/.runtime/<c>/brainstorm/`,`git status --ignored` 显示为忽略。
 - 未做:`examples/todo-cli` 仍是旧 8 阶段流程的产物(state v1、checkbox tasks.md、`docs/changes/<c>/.runtime/sdd/`),未按新流程重跑——需真实走一遍 design/tasks/build 才有意义,留待用户决定。
+
+## Phase 14 — DeepSeek Harness 宿主适配(已完成)
+
+用户要求 mulix skill 适配 DeepSeek Harness(dsh)。核实官方出处后确认适配确有必要且路径明确:dsh 的本地技能发现根里 rank 100 是 `<projectRoot>/.dsh/skills/`(最高优先级),rank 200 是 `.agents/skills`,**不含 `.claude/skills`**——mulix 现有安装对 dsh 完全不可见;dsh 每会话加载项目根 `AGENTS.md`(`instructionFileCandidates` 默认 `['AGENTS.md', 'CLAUDE.md']`)与全局 `~/.dsh/AGENTS.md`;技能名必须 kebab-case(`^[a-z0-9]+(?:-[a0-9]+)*$`,mulix 全部技能合规);dsh 没有 PreToolUse hook 等价物。
+
+### 决策(经用户确认,三轮选择)
+
+- **宿主选择**:`mulix init --host <name>` 显式指定(可重复、可逗号分隔,默认 `claude` 保持向后兼容),不做自动检测(mulix 的 Phase 10 先例是"检测到再提示",不自动装错);`mulix update` 无参数,从 `.mulix/.installed/` 基线目录派生已安装宿主——claude 恒在(历史项目全有),dsh 仅当 `.mulix/.installed/.dsh/skills` 存在文件时纳入,保证 update 永不把 `.dsh/skills` 写进只装了 claude 的项目。给已有项目追加宿主 = 重跑 `init --host dsh`(幂等,只补缺失)。
+- **AGENTS.md 引导段**:dsh 宿主 init 时往项目根 `AGENTS.md` 合并一段哨兵注释(`<!-- mulix:begin/end -->`)包住的引导(技能目录、`mulix state show` 优先、无 hook 时 guard 即强制、阶段白名单靠纪律遵守),幂等可刷新,标记外内容一律不动;无结束标记的孤立 begin 标记报错拒绝而不是猜。update 在 dsh 宿主已安装时刷新该段。选择写引导段的理由:该宿主每会话加载 AGENTS.md,而没有 hook 时阶段白名单全靠纪律,需要这个常驻锚点。
+- **正文适配**:mulix 自有技能(`assets/skills/**`)里写死 `.claude/skills` 路径的地方改为 `{{SKILLS_DIR}}` 占位符,init/update 安装时按宿主替换为其实际技能目录;hook 表述改为宿主中性("Claude Code 上 hook 拦截,无 hook 的宿主上白名单靠纪律约束")。**内嵌 superpowers 技能逐字复制、不替换占位符**——保住 `sync-superpowers.sh` 的"定点补丁必须恰好命中一次"纪律,上游同步路径不被 mulix 侧语法污染。模板文件无 `.claude` 引用,不动。
+
+### 改动范围
+
+**`internal/scaffold`**:
+- 新增 `host.go`:`Host` 类型(`claude`/`dsh`)、`SkillsDirPlaceholder`、`ParseHosts`(CLI 参数解析:大小写不敏感、去空白、逗号分隔、去重保序、未知宿主报错)、`normalizeHosts`(零值回退 `[claude]`,API 兼容)、每宿主能力谓词(`skillsDir`/`installsHook`/`writesBootstrap`)。
+- 新增 `agentsmd.go`:`agentsBootstrapSection`(按技能目录渲染引导段)、`mergeAgentsBootstrap`(读入-替换/追加/新建三种路径,哨兵区间外零改动,变更才写盘返回 changed)。
+- `managed.go`:`managedFiles()` → `managedFiles(hosts []Host)`,按宿主循环安装 mulix 技能(mulix 自有技能做占位符替换)与内嵌 superpowers 技能(逐字复制);模板与 LICENSE/VERSION 宿主无关,仍在循环外。
+- `init.go`:`InitOptions` 新增 `Hosts []Host`;hook 安装与 AGENTS.md 合并按宿主能力分发;`InitResult` 中引导段以 `AGENTS.md (mulix section)` 计入 written/skipped。
+- `update.go`:新增 `updateHosts(root)`(派生已安装宿主)与 `dirHasFiles`;update 末尾对 dsh 宿主刷新 AGENTS.md 段(变更计 `Updated`,已当前计 `Skipped`)。
+
+**`internal/cliutil`**:
+- `init_cmd.go`:`--host` StringSlice 旗标(默认 `claude`);尾部提示改为按宿主分别输出(Claude Code 的 superpowers 插件提示仅 claude 时打印;新增 DSH 提示说明无 hook、guard 即强制);`Short` 文案注明 hook 仅 Claude Code。
+- `update_cmd.go`:`Long` 说明补充 dsh 树与派生语义。
+
+**技能层**(`assets/skills/`,内嵌 superpowers 不动):
+- `using-mulix/SKILL.md`:强制层 1 改为"Claude Code 上 PreToolUse hook 拦截;无 hook 宿主(如 DeepSeek Harness)没有这层自动强制,白名单依然约束你";嵌入技能安装路径改 `{{SKILLS_DIR}}/`;红旗清单的 hook 句改为"阶段门禁:hook(Claude Code)+ guard 与纪律(所有宿主)"。
+- `mulix-tasks/SKILL.md`:评审提示词路径改 `{{SKILLS_DIR}}/writing-plans/plan-document-reviewer-prompt.md`(DSH 上该文件实际所在处)。
+- `mulix-build/SKILL.md`:worktree 说明里"the directory Claude Code runs in"改为宿主中性的"the directory the agent session runs in"。
+- `mulix-archive/SKILL.md`:改为"本阶段零写入:Claude Code 上 hook 拦截,无 hook 宿主同样约束;finishing 技能走 git 命令,从未被拦截"。
+- `mulix-design/SKILL.md`:"此外无物可写"补上无 hook 宿主的纪律表述。
+
+**测试**:
+- `host_test.go`(新):ParseHosts 全路径(单值/逗号/重复/去重/大小写/空段/未知宿主)、normalizeHosts 零值回退、skillsDir、能力谓词。
+- `agentsmd_test.go`(新):缺失时创建、有用户内容时追加且原文前置、幂等(二次 merge 字节级不变、标记恰一个)、陈旧段替换(段内旧正文消失、段外用户内容保留)、孤立 begin 标记报错。
+- `init_test.go` 增补:默认宿主仅 claude(无 .dsh 树、无 AGENTS.md);`--host dsh` 写 .dsh 全套 + AGENTS.md + 基线,不碰 .claude;占位符替换后无残留、内嵌技能逐字一致;幂等含引导段;双宿主两套树各自指向各自目录;未知宿主拒绝。
+- `update_test.go` 增补:基线派生(改脏 .dsh 文件 → update 原位刷新并在 updated 里报告);claude-only 项目 update 永不产生 .dsh/AGENTS.md;AGENTS.md 段被篡改后 update 恢复。
+- `cliutil/init_cmd_test.go`(新):`--host dsh`/`claude`/`claude,dsh`/未知宿主四条端到端路径(含输出提示与 settings.json 存在性断言)。
+
+### 验证
+
+- [x] `go build ./...`、`go vet ./...`、`gofmt -l .`、`go test ./... -count=1` 全绿。
+- [x] 手动冒烟:`go run ./cmd/mulix init --dir <tmp> --host dsh` 临时目录实测——`.dsh/skills/` 全套技能、AGENTS.md 哨兵段、无 .claude 残留;`--host claude,dsh` 双树并存。
+- 未做:`examples/todo-cli` 的 `.claude/skills/` 副本不回填(该 example 是历史运行记录,Phase 13 先例是整流程重跑才有意义,留待用户决定);`scripts/smoke-e2e.sh` 不扩展 dsh 场景(脚本以 bash + Claude Code hook 为前提,DSH 侧断言由本阶段单测与手动冒烟覆盖)。

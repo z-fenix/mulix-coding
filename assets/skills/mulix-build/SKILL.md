@@ -53,7 +53,7 @@ these mulix specifics:
 - **Worktree.** `using-git-worktrees` asks before creating one. If you
   do work in a new worktree, run mulix commands from it and keep
   `.mulix/` there — the hook and guards read state relative to the
-  directory Claude Code runs in.
+  directory the agent session runs in.
 - **TDD evidence, both methods.** For every task, the workspace must hold
   `task-N-report.md` with a `RED:` line (the command, the failing output
   before implementation, why the failure was expected) and a `GREEN:` line

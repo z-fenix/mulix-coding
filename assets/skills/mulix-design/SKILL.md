@@ -46,9 +46,11 @@ new track), never the reverse.
 - Design doc: `.mulix/.runtime/<change>/specs/` (architectural only).
 - Visual companion: pass the project root as `--project-dir`; sessions
   land in `.mulix/.runtime/<change>/brainstorm/` (git-ignored).
-- Nothing else is writable in this phase — the hook blocks spec.md,
-  docs/changes/, and source code. If the design shows the spec itself is
-  wrong, stop and tell the human; changing requirements is their call.
+- Nothing else is writable in this phase — on Claude Code the hook
+  blocks spec.md, docs/changes/, and source code; on hosts without the
+  hook the same whitelist binds by discipline. If the design shows the
+  spec itself is wrong, stop and tell the human; changing requirements
+  is their call.
 
 ## Ending the phase
 

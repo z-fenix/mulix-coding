@@ -29,24 +29,29 @@ type UpdateOptions struct {
 	Force bool
 }
 
-// Update refreshes every managed file (see managedFiles: mulix's skills,
-// the embedded superpowers skills with their scripts and prompts, and the
-// templates) in a target project to the versions in this mulix binary.
-// Files the user hasn't touched are updated in place; locally modified
-// files are three-way merged against the baseline copy recorded at
-// install time (.mulix/.installed/), with real conflicts left in the file
-// as Git-style markers and reported. Files without a baseline (installed
-// by an older mulix) are skipped and reported — guessing a merge base
-// isn't safe. Files this mulix no longer ships are removed if untouched.
+// Update refreshes every managed file (see managedFiles: mulix's skills
+// and the embedded superpowers skills under each installed host's skills
+// directory, and the templates) in a target project to the versions in
+// this mulix binary. Which hosts' trees are refreshed is derived from the
+// project itself (see updateHosts). Files the user hasn't touched are
+// updated in place; locally modified files are three-way merged against
+// the baseline copy recorded at install time (.mulix/.installed/), with
+// real conflicts left in the file as Git-style markers and reported.
+// Files without a baseline (installed by an older mulix) are skipped and
+// reported — guessing a merge base isn't safe. Files this mulix no longer
+// ships are removed if untouched.
 //
 // update does not touch .mulix/memory/constitution.md (a user-authored
 // document), .claude/settings.json (init's hook merge already handles
 // it), .mulix/presets/ (deliberate overrides, not core content), or
-// .mulix/.runtime/ (the changes' own records).
+// .mulix/.runtime/ (the changes' own records). It refreshes the mulix
+// section of AGENTS.md when the project has DSH skills installed.
 func Update(opts UpdateOptions) (UpdateResult, error) {
 	var res UpdateResult
 
-	files, err := managedFiles()
+	hosts := updateHosts(opts.Root)
+
+	files, err := managedFiles(hosts)
 	if err != nil {
 		return res, err
 	}
@@ -68,7 +73,55 @@ func Update(opts UpdateOptions) (UpdateResult, error) {
 		}
 	}
 
+	for _, h := range hosts {
+		if !h.writesBootstrap() {
+			continue
+		}
+		changed, err := mergeAgentsBootstrap(opts.Root, h.skillsDir())
+		if err != nil {
+			return res, err
+		}
+		if changed {
+			res.Updated = append(res.Updated, agentsBootstrapFile+" (mulix section)")
+		} else {
+			res.Skipped = append(res.Skipped, agentsBootstrapFile+" (mulix section, already current)")
+		}
+	}
+
 	return res, nil
+}
+
+// updateHosts decides which hosts' skill trees update refreshes. Claude
+// Code is always refreshed — it's the host every existing project
+// installed. DeepSeek Harness is refreshed only when this project
+// installed its tree, which the baseline copy under .mulix/.installed/
+// records; deriving it from disk keeps update stateless and never writes
+// .dsh/skills into a project that didn't ask for it.
+func updateHosts(root string) []Host {
+	hosts := []Host{HostClaude}
+	if dirHasFiles(filepath.Join(root, ".mulix", ".installed", filepath.FromSlash(HostDSH.skillsDir()))) {
+		hosts = append(hosts, HostDSH)
+	}
+	return hosts
+}
+
+// dirHasFiles reports whether dir exists and contains at least one
+// regular file (at any depth). A missing or unreadable tree counts as
+// having no files.
+func dirHasFiles(dir string) bool {
+	found := false
+	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			// The tree doesn't exist (or isn't readable): not installed.
+			return filepath.SkipAll
+		}
+		if d.Type().IsRegular() {
+			found = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return found
 }
 
 // removeObsolete deletes a file an older mulix installed and this one no

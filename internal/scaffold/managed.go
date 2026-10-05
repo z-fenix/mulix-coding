@@ -28,25 +28,28 @@ func (f managedFile) Mode() fs.FileMode {
 }
 
 // SuperpowersDir is where the embedded superpowers skills' license and
-// version stamp are installed. The skills themselves go to .claude/skills/
-// like mulix's own.
+// version stamp are installed. The skills themselves go to each host's
+// project skills directory, like mulix's own.
 const SuperpowersDir = ".mulix/superpowers"
 
 // managedFiles lists every file init installs and update refreshes, in a
 // stable order:
 //
-//   - mulix's phase skills: assets/skills/<name>/** → .claude/skills/<name>/**
-//   - every embedded superpowers skill, whole directory (SKILL.md plus its
-//     prompts, references, and scripts): assets/superpowers/skills/<name>/**
-//     → .claude/skills/<name>/**
+//   - for each requested host, mulix's phase skills:
+//     assets/skills/<name>/** → <host skills dir>/<name>/**, with
+//     SkillsDirPlaceholder in the body replaced by that directory
+//   - for each requested host, every embedded superpowers skill, whole
+//     directory (SKILL.md plus its prompts, references, and scripts):
+//     assets/superpowers/skills/<name>/** → <host skills dir>/<name>/**,
+//     copied verbatim (no placeholder substitution)
 //   - the superpowers license and version: → .mulix/superpowers/
 //   - templates: assets/templates/* → .mulix/templates/*
 //
 // The constitution is deliberately not here: it's seeded once by init and
 // is the user's document from then on.
-func managedFiles() ([]managedFile, error) {
+func managedFiles(hosts []Host) ([]managedFile, error) {
 	var out []managedFile
-	add := func(fsys fs.FS, srcRoot, destRoot string) error {
+	add := func(fsys fs.FS, srcRoot, destRoot string, substituteSkillsDir bool) error {
 		return fs.WalkDir(fsys, srcRoot, func(p string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
 				return err
@@ -55,16 +58,24 @@ func managedFiles() ([]managedFile, error) {
 			if err != nil {
 				return err
 			}
+			if substituteSkillsDir {
+				data = bytes.ReplaceAll(data, []byte(SkillsDirPlaceholder), []byte(destRoot))
+			}
 			rel := path.Join(destRoot, p[len(srcRoot)+1:])
 			out = append(out, managedFile{Rel: rel, Data: data})
 			return nil
 		})
 	}
-	if err := add(assets.Skills, "skills", ".claude/skills"); err != nil {
-		return nil, err
-	}
-	if err := add(assets.Superpowers, "superpowers/skills", ".claude/skills"); err != nil {
-		return nil, err
+	for _, h := range hosts {
+		dir := h.skillsDir()
+		// mulix's own skills are host-aware; the embedded superpowers
+		// skills are upstream content and install verbatim.
+		if err := add(assets.Skills, "skills", dir, true); err != nil {
+			return nil, err
+		}
+		if err := add(assets.Superpowers, "superpowers/skills", dir, false); err != nil {
+			return nil, err
+		}
 	}
 	for _, name := range []string{"LICENSE", "VERSION"} {
 		data, err := fs.ReadFile(assets.Superpowers, "superpowers/"+name)
@@ -73,7 +84,7 @@ func managedFiles() ([]managedFile, error) {
 		}
 		out = append(out, managedFile{Rel: path.Join(SuperpowersDir, name), Data: data})
 	}
-	if err := add(assets.Templates, "templates", ".mulix/templates"); err != nil {
+	if err := add(assets.Templates, "templates", ".mulix/templates", false); err != nil {
 		return nil, err
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Rel < out[j].Rel })
