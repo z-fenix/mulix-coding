@@ -91,7 +91,7 @@ cat > "docs/changes/$c/tasks.md" <<'EOF'
 
 ## Task 1: Greeter
 
-- [ ] **Step 1: Write the failing test**
+**Step 1: Write the failing test**
 
 ```markdown
 ## Task 9: an example heading inside a fence is not a task
@@ -99,7 +99,7 @@ cat > "docs/changes/$c/tasks.md" <<'EOF'
 
 ## Task 2: CLI
 
-- [ ] **Step 1: Write the failing test**
+**Step 1: Write the failing test**
 EOF
 mulix state set tasks_path "docs/changes/$c/tasks.md" >/dev/null
 mulix state transition tasks-complete >/dev/null

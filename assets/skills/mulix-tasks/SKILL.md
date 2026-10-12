@@ -35,7 +35,9 @@ mulix specifics:
 - **Steps:** the RED → verify RED → GREEN → verify GREEN → commit order
   writing-plans prescribes, with complete test and code blocks and
   `Expected:` lines. The build phase's TDD evidence comes from these
-  steps.
+  steps. Mulix override: steps are plain bold headings
+  (`**Step 1: ...**`) with no `- [ ]` checkbox markers — ignore
+  writing-plans' checkbox format.
 - `.mulix/templates/tasks-template.md` shows the resulting layout. If a
   preset overrides it (`mulix preset resolve tasks-template`), follow the
   override's structure — but the `## Task N` headings are not optional.

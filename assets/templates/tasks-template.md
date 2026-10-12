@@ -1,6 +1,6 @@
 # [FEATURE NAME] Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps are plain bold step headings — no checkbox markers.
 
 <!-- Written by the tasks phase via the writing-plans skill; executed by
      the build phase. mulix depends on exactly one structural rule here:
@@ -49,29 +49,29 @@ to the task that owns the code.]
 - Consumes: [what this task uses from earlier tasks — exact signatures]
 - Produces: [what later tasks rely on — exact names, parameter and return types]
 
-- [ ] **Step 1: Write the failing test**
+**Step 1: Write the failing test**
 
 ```[language]
 [complete test code]
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+**Step 2: Run test to verify it fails**
 
 Run: `[exact test command]`
 Expected: FAIL with "[expected failure message]"
 
-- [ ] **Step 3: Write minimal implementation**
+**Step 3: Write minimal implementation**
 
 ```[language]
 [complete implementation code]
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+**Step 4: Run test to verify it passes**
 
 Run: `[exact test command]`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+**Step 5: Commit**
 
 ```bash
 git add [files]
