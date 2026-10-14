@@ -48,11 +48,7 @@ headings and steps are not.
 ## Review before the gate
 
 1. Run writing-plans' Self-Review and fix what it finds inline.
-2. Dispatch one plan reviewer with
-   `{{SKILLS_DIR}}/writing-plans/plan-document-reviewer-prompt.md`
-   (plan = tasks.md, spec = spec.md). Fix every Issue it raises; its
-   Recommendations are advisory.
-3. Link tasks.md for the human and ask whether it captures what they
+2. Link tasks.md for the human and ask whether it captures what they
    want. Wait for their answer; revise on feedback.
 
 There is no execution handoff here: don't ask how to execute and don't

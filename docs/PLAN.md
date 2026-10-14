@@ -439,3 +439,25 @@ docs/changes/<NNN-slug>/
 - [x] `go build ./...`、`go vet ./...`、`gofmt -l .`、`go test ./... -count=1` 全绿。
 - [x] 手动冒烟:`go run ./cmd/mulix init --dir <tmp> --host dsh` 临时目录实测——`.dsh/skills/` 全套技能、AGENTS.md 哨兵段、无 .claude 残留;`--host claude,dsh` 双树并存。
 - 未做:`examples/todo-cli` 的 `.claude/skills/` 副本不回填(该 example 是历史运行记录,Phase 13 先例是整流程重跑才有意义,留待用户决定);`scripts/smoke-e2e.sh` 不扩展 dsh 场景(脚本以 bash + Claude Code hook 为前提,DSH 侧断言由本阶段单测与手动冒烟覆盖)。
+
+## Phase 15 — 更新内嵌 superpowers 到 v7.0.0(已完成)
+
+上游 `obra/superpowers` 从 6.4.1 升到 7.0.0(HEAD 即 v7.0.0 release commit `bb92a77`)。主要变更:brainstorming 整个重写、writing-plans 精简(去掉 "No Placeholders",改 "What a Step Contains" + Proportion 自审)、一批 Git Bash/Windows 兼容修复。同步脚本的定点补丁纪律如期生效:只有 brainstorming 头部补丁因标题从 `# Brainstorming Ideas Into Designs` 变成 `# Brainstorming` 且正文重写而失配,其余补丁原样命中。
+
+### 决策(经用户确认)
+
+- **plan-document-reviewer 去掉**:上游 v7 删除 `writing-plans/plan-document-reviewer-prompt.md`,tasks 阶段改为只靠 writing-plans 的 Self-Review + 人工 review。mulix 跟随上游,`mulix-tasks` 不再派发独立评审子代理;`update_test.go` 的存在性断言改用 v7 新文件 `brainstorming/builder-check-prompt.md`。
+
+### 改动范围
+
+- **`scripts/sync-superpowers.sh`**:brainstorming 头部补丁锚点改为 `# Brainstorming`;注入的 mulix 说明按 v7 的 "Size the Work" 三档改写——change 已有 spec,故 "quick, clear task" 与跳过提问都不适用,size 只取 bounded(small change:聊天内描述即设计)或 architectural(project:书面设计文档);spike 同样不适用;HARD-GATE 保留,但批准记录在 mulix state、阶段到此结束,design 阶段不实现任何东西也不调 writing-plans。
+- **`assets/superpowers/`**:重新 vendor(74 文件)。`VERSION` → 7.0.0;`brainstorming/SKILL.md` 重写,新增 `builder-check-prompt.md`,删除 `spec-document-reviewer-prompt.md`;`writing-plans/SKILL.md` 精简,删除 `plan-document-reviewer-prompt.md`;`server.cjs`/`task-done`/`sdd-workspace`/`requesting-code-review`/`systematic-debugging` 为上游修复。mulix 侧改写全部保留(writing-plans 的 `## Task N`、保存到 `docs/changes/<change>/tasks.md`、删 Execution Handoff;SDD/inline 保留 workspace;server.cjs 固定版本号)。
+- **`assets/skills/mulix-tasks/SKILL.md`**:"Review before the gate" 去掉派发 plan reviewer 的那一步(三步变两步)。
+- **`assets/skills/mulix-design/SKILL.md`**:architectural 档的描述改为 v7 流程(对话 → 书面设计 → builder check 子代理,最多带回一轮问题 → 人工 review),不再写 "2-3 approaches / sectioned design / self-review"。
+- **`README.md`**:阶段表的 tasks 行改为 "self-reviewed, then approved by the human"。
+- **`internal/scaffold/update_test.go`**:断言的文件名随上。
+
+### 验证
+
+- [x] `scripts/sync-superpowers.sh <v7 checkout>` 成功 vendored 7.0.0(74 文件),脚本末尾断言无残留上游路径(`.superpowers/`、`docs/superpowers/`、`superpowers:<skill>`)。
+- [x] `go build ./...`、`go test ./... -count=1` 全绿。

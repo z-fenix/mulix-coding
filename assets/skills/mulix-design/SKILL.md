@@ -29,10 +29,12 @@ mulix state set design_track bounded        # or: architectural
   this repo. Clarifying questions, a short design in chat, then STOP for
   an explicit yes. No design doc.
 - **architectural** — anything else (new subsystem, new project,
-  interfaces others depend on). The full brainstorming process: questions
-  one at a time, 2-3 approaches, sectioned design, then the written spec
-  at `.mulix/.runtime/<change>/specs/YYYY-MM-DD-<topic>-design.md`, its
-  self-review, and the human's review of the written file.
+  interfaces others depend on). The full brainstorming process: the
+  conversation, then the written design at
+  `.mulix/.runtime/<change>/specs/YYYY-MM-DD-<topic>-design.md`, its
+  builder check (a fresh subagent reads it as the builder and at most one
+  round of questions comes back), and the human's review of the written
+  file.
 - **spike** does not apply here: the change already has a spec, so its
   output is code that ships. If the human really only wants an answer to a
   feasibility question, say so and stop — that's not a mulix change.

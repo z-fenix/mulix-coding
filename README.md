@@ -40,7 +40,7 @@ specify → clarify → design → tasks → build → verify → archive
 | specify | WHAT/WHY, no design | `docs/specs/<change>/spec.md` |
 | clarify | up to 5 targeted questions | spec.md `## Clarifications` |
 | design  | `brainstorming`: classify (bounded / architectural), design, explicit approval | `.mulix/.runtime/<change>/specs/*-design.md` (architectural) |
-| tasks   | `writing-plans`: the approved design becomes an executable plan, reviewed by a plan-reviewer subagent | `docs/changes/<change>/tasks.md` (`## Task N` sections) |
+| tasks   | `writing-plans`: the approved design becomes an executable plan, self-reviewed, then approved by the human | `docs/changes/<change>/tasks.md` (`## Task N` sections) |
 | build   | `test-driven-development`, executed by `subagent-driven-development` or `executing-plans` (chosen at build start) | code + tests; `.mulix/.runtime/<change>/sdd/tasks/` |
 | verify  | `verification-before-completion`: full suite, spec check, rulings review | `docs/changes/<change>/report.md` |
 | archive | `finishing-a-development-branch`: merge / PR / keep | — |

@@ -203,7 +203,7 @@ func TestInit_InstallsEverySuperpowersSkillDirectory(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 	for _, rel := range []string{
-		".claude/skills/writing-plans/plan-document-reviewer-prompt.md",
+		".claude/skills/brainstorming/builder-check-prompt.md",
 		".claude/skills/subagent-driven-development/implementer-prompt.md",
 		".claude/skills/executing-plans/scripts/task-done",
 		".claude/skills/using-superpowers/references/claude-code-tools.md",
