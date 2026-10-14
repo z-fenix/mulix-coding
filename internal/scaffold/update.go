@@ -67,7 +67,15 @@ func Update(opts UpdateOptions) (UpdateResult, error) {
 		}
 	}
 
-	for _, rel := range obsoleteFiles {
+	// Files the last mulix shipped and this one no longer does: a
+	// superpowers file upstream deleted, a renamed mulix skill, a dropped
+	// template. The install baseline records every file an older mulix
+	// wrote, so this is derived rather than listed by hand.
+	shipped := make(map[string]bool, len(files))
+	for _, f := range files {
+		shipped[f.Rel] = true
+	}
+	for _, rel := range unshippedBaselineFiles(opts.Root, hosts, shipped) {
 		if err := removeObsolete(&res, opts, rel); err != nil {
 			return res, err
 		}
@@ -122,6 +130,61 @@ func dirHasFiles(dir string) bool {
 		return nil
 	})
 	return found
+}
+
+// unshippedBaselineFiles walks the install baseline (.mulix/.installed/,
+// a mirror of the project root as mulix last left it) and returns every
+// file inside a tree mulix owns that the current bundle no longer ships.
+// Upstream deleting a superpowers file between versions, a renamed mulix
+// skill, and a dropped template all land here, so no list has to be
+// maintained. Paths are root-relative and slash-separated, in lexical
+// walk order.
+func unshippedBaselineFiles(root string, hosts []Host, shipped map[string]bool) []string {
+	base := filepath.Join(root, ".mulix", ".installed")
+	owned := mulixOwnedDirs(hosts)
+	ownedByMulix := func(rel string) bool {
+		for _, dir := range owned {
+			if strings.HasPrefix(rel, dir+"/") {
+				return true
+			}
+		}
+		return false
+	}
+	var out []string
+	_ = filepath.WalkDir(base, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			// A missing baseline (or an unreadable subtree) has nothing
+			// to report.
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(base, p)
+		if relErr != nil {
+			return nil
+		}
+		if rel = filepath.ToSlash(rel); ownedByMulix(rel) && !shipped[rel] {
+			out = append(out, rel)
+		}
+		return nil
+	})
+	return out
+}
+
+// mulixOwnedDirs are the trees mulix owns outright: the skills
+// directories it installs into each host, and its own .mulix content
+// directories. Anything inside them that the current bundle doesn't ship
+// is leftover from an older install. What mulix seeds once and then
+// leaves to the project — the constitution, .mulix/.runtime/.gitignore,
+// .mulix/presets/ — sits outside them, so a baseline entry there is never
+// a removal candidate.
+func mulixOwnedDirs(hosts []Host) []string {
+	dirs := []string{SuperpowersDir, ".mulix/templates"}
+	for _, h := range hosts {
+		dirs = append(dirs, h.skillsDir())
+	}
+	return dirs
 }
 
 // removeObsolete deletes a file an older mulix installed and this one no

@@ -454,10 +454,13 @@ docs/changes/<NNN-slug>/
 - **`assets/superpowers/`**:重新 vendor(74 文件)。`VERSION` → 7.0.0;`brainstorming/SKILL.md` 重写,新增 `builder-check-prompt.md`,删除 `spec-document-reviewer-prompt.md`;`writing-plans/SKILL.md` 精简,删除 `plan-document-reviewer-prompt.md`;`server.cjs`/`task-done`/`sdd-workspace`/`requesting-code-review`/`systematic-debugging` 为上游修复。mulix 侧改写全部保留(writing-plans 的 `## Task N`、保存到 `docs/changes/<change>/tasks.md`、删 Execution Handoff;SDD/inline 保留 workspace;server.cjs 固定版本号)。
 - **`assets/skills/mulix-tasks/SKILL.md`**:"Review before the gate" 去掉派发 plan reviewer 的那一步(三步变两步)。
 - **`assets/skills/mulix-design/SKILL.md`**:architectural 档的描述改为 v7 流程(对话 → 书面设计 → builder check 子代理,最多带回一轮问题 → 人工 review),不再写 "2-3 approaches / sectioned design / self-review"。
+- **`internal/scaffold/managed.go` / `update.go`**:`obsoleteFiles` 写死清单删除,改为从基线目录 `.mulix/.installed/` 派生——只扫 mulix 完全拥有的目录树(各宿主技能目录、`.mulix/superpowers`、`.mulix/templates`)里、当前 bundle 不再发布的文件,判定仍是"与基线逐字节一致才删,改过的只报告"。上游删文件(本次两个 prompt 模板)、mulix 技能改名、模板下架都自动覆盖,不再需要人工维护清单;init 一次性播种的文件(constitution、`.mulix/.runtime/.gitignore`)在这些拥有树之外,不会被清扫误删(`managedFiles` 不含它们,但 init 给它们写了基线,按"基线减去 managed"会误删)。
+- **`internal/scaffold/update_test.go`**:新增 `TestUpdate_RemovesFileUpstreamNoLongerShips`(上游删除的 superpowers 文件被清掉、同目录仍在发布的文件不受影响)与 `TestUpdate_KeepsSeededOnceFilesOutOfTheObsoleteSweep`(constitution 与 runtime `.gitignore` 必须存活);`TestInit_InstallsEverySuperpowersSkillDirectory` 断言的文件名换成 `brainstorming/builder-check-prompt.md`。
 - **`README.md`**:阶段表的 tasks 行改为 "self-reviewed, then approved by the human"。
-- **`internal/scaffold/update_test.go`**:断言的文件名随上。
 
 ### 验证
 
 - [x] `scripts/sync-superpowers.sh <v7 checkout>` 成功 vendored 7.0.0(74 文件),脚本末尾断言无残留上游路径(`.superpowers/`、`docs/superpowers/`、`superpowers:<skill>`)。
-- [x] `go build ./...`、`go test ./... -count=1` 全绿。
+- [x] `go build ./...`、`go vet ./...`、`go test ./... -count=1` 全绿;`scripts/smoke-e2e.sh` 七阶段通过。
+- [x] 本机 `scripts/install.sh --source .` 重装 `~/.local/bin/mulix.exe`,临时目录 `mulix init` 确认带 7.0.0。
+- [x] `ledger/biz-finance`、`ledger/biz-finance-web` 各跑一次 `mulix update` → 两处 `VERSION` 均为 7.0.0;随后再跑一次,两个上游已删 prompt 模板被清掉,constitution 与 `.mulix/.runtime/.gitignore` 原样保留(biz-finance-web 的 `tasks-template.md` 有本地改动,按设计只报冲突不动它)。

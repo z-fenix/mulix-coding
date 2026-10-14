@@ -90,14 +90,3 @@ func managedFiles(hosts []Host) ([]managedFile, error) {
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Rel < out[j].Rel })
 	return out, nil
 }
-
-// obsoleteFiles are files older mulix versions installed that this one
-// no longer ships. update removes each one that is still byte-identical
-// to its install baseline, and reports the rest for manual cleanup.
-var obsoleteFiles = []string{
-	".claude/skills/mulix-using-mulix/SKILL.md", // renamed to using-mulix
-	".claude/skills/mulix-plan/SKILL.md",        // plan phase folded into design (brainstorming)
-	".claude/skills/mulix-analyze/SKILL.md",     // analyze phase folded into design/tasks
-	".mulix/templates/plan-template.md",
-	".mulix/templates/analyze-template.md",
-}

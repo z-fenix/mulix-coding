@@ -265,6 +265,60 @@ func TestUpdate_RemovesUntouchedObsoleteFileKeepsModifiedOne(t *testing.T) {
 	}
 }
 
+// An upstream superpowers release deletes a file the project installed.
+// The baseline still records it, so update cleans it up with no list to
+// maintain — and leaves the rest of the skill directory alone.
+func TestUpdate_RemovesFileUpstreamNoLongerShips(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Init(InitOptions{Root: root}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	staleRel := ".claude/skills/writing-plans/plan-document-reviewer-prompt.md"
+	writeProjectFile(t, root, staleRel, "old prompt\n")
+	writeProjectFile(t, root, ".mulix/.installed/"+staleRel, "old prompt\n")
+
+	res, err := Update(UpdateOptions{Root: root})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(staleRel))); !os.IsNotExist(err) {
+		t.Fatalf("expected the upstream-deleted file to be removed, stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".claude", "skills", "writing-plans", "SKILL.md")); err != nil {
+		t.Fatalf("expected the skill's shipped files to survive: %v", err)
+	}
+	for _, rel := range res.Removed {
+		if rel == staleRel {
+			return
+		}
+	}
+	t.Fatalf("expected %s in Removed, got %+v", staleRel, res.Removed)
+}
+
+// The baseline records everything init wrote, including what it seeds
+// once and then leaves to the project. The obsolete sweep must stay
+// inside the trees mulix owns, so those files survive.
+func TestUpdate_KeepsSeededOnceFilesOutOfTheObsoleteSweep(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Init(InitOptions{Root: root}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	res, err := Update(UpdateOptions{Root: root})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	for _, rel := range []string{".mulix/memory/constitution.md", ".mulix/.runtime/.gitignore"} {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err != nil {
+			t.Fatalf("expected %s to survive update: %v", rel, err)
+		}
+		for _, removed := range res.Removed {
+			if removed == rel {
+				t.Fatalf("update removed a seeded-once file: %s", rel)
+			}
+		}
+	}
+}
+
 func TestUpdate_DerivesDSHHostFromBaselines(t *testing.T) {
 	root := t.TempDir()
 	if _, err := Init(InitOptions{Root: root, Hosts: []Host{HostDSH}}); err != nil {
