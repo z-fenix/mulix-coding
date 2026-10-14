@@ -1,8 +1,8 @@
 # mulix-coding
 
 A Go CLI that brings spec-driven development, an enforced phase state
-machine, and the full superpowers skill set together for **Claude
-Code**. It borrows from four existing projects:
+machine, and the full superpowers skill set together for **Claude Code**
+and **DeepSeek Harness**. It borrows from four existing projects:
 
 - **spec-kit** — the constitution → specify → clarify front half of the
   workflow, its spec template, preset system, and taskstoissues.
@@ -19,12 +19,12 @@ Code**. It borrows from four existing projects:
   as trigger conditions only (never a process summary, so the model can't
   use the summary as an excuse to skip loading the real content).
 
-**Phase 1 scope**: Claude Code only. No other agent host, no caveman
+**Phase 1 scope** was Claude Code only: no other agent host, no caveman
 compression engine/BM25/browse infrastructure, no comet Native
-workflow/dashboard, no spec-kit self-update. See [`docs/PLAN.md`](docs/PLAN.md)
-for the full phase breakdown and what's explicitly out of scope.
-DeepSeek Harness was added later as a second agent host (Phase 14) —
-see [Install into a project](#install-into-a-project).
+workflow/dashboard, no spec-kit self-update. DeepSeek Harness arrived
+later as a second agent host (Phase 14) — see [Install into a
+project](#install-into-a-project). The rest of that list is still out of
+scope; [`docs/PLAN.md`](docs/PLAN.md) has the full phase breakdown.
 
 mulix does port spec-kit's **preset** system (a template-override stack)
 and **taskstoissues** (GitHub issue conversion) — see below.
@@ -72,7 +72,7 @@ Two independent mechanisms enforce phase gating from that state:
 
 ## Embedded superpowers
 
-All fourteen [superpowers](https://github.com/obra/superpowers) skills
+All fifteen [superpowers](https://github.com/obra/superpowers) skills
 are vendored into `assets/superpowers/` (MIT; license and version
 installed to `.mulix/superpowers/`) and installed by `mulix init` as
 plain project skills in the host's skills directory (`.claude/skills/`
@@ -105,10 +105,14 @@ selected agent hosts, and — for Claude Code — merges a `PreToolUse`
 hook entry into `.claude/settings.json` without disturbing any
 hooks/settings you already have. It does not create `docs/specs/` or
 `docs/changes/` — those come from `mulix new`, once there's an actual
-change to hold. Re-running `mulix init` is safe (it skips files that
-already exist); `mulix update` refreshes installed files after an
-upgrade, three-way merging local edits and removing files this version
-no longer ships if they're untouched.
+change to hold. `--dir` targets a project directory other than the
+current one; `--force` overwrites files mulix already installed.
+
+Re-running `mulix init` is safe (it skips files that already exist);
+`mulix update` refreshes installed files after an upgrade, three-way
+merging local edits and removing files this version no longer ships if
+they're untouched. `mulix update --force` skips the merge and overwrites
+every managed file with the bundled version, discarding local edits.
 
 ### Agent hosts
 
@@ -151,9 +155,19 @@ mulix new "<title>"              # create a change, starts in the specify phase
 mulix state show [--change ID]   # see the current phase and what can happen next
 mulix state set <field> <value>  # record an artifact path or flag (does not change phase)
 mulix state transition <event>   # run guards, then advance the phase if they pass
+mulix state select <change>      # set the active change for commands that omit --change
 mulix guard <event>              # run guards read-only, without transitioning
 mulix status                     # list every change and its phase
 ```
+
+`--change ID` is accepted by `state show`, `state set`, `state
+transition`, and `guard`; each defaults to the active change, which
+`state select` sets. `mulix new --branch <name>` records a git branch
+name in the change's state — mulix does not create the branch itself.
+
+`mulix state transition --force` applies a transition even when guard
+checks fail. That bypasses the strong flow control the rest of mulix is
+built around, so it's worth knowing it exists and worth not reaching for.
 
 Settable fields: `spec_path`, `tasks_path`, `report_path`,
 `clarify_skipped`, `design_track` (`bounded|architectural`),
