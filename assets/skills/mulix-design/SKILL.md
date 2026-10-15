@@ -48,11 +48,12 @@ new track), never the reverse.
 - Design doc: `.mulix/.runtime/<change>/specs/` (architectural only).
 - Visual companion: pass the project root as `--project-dir`; sessions
   land in `.mulix/.runtime/<change>/brainstorm/` (git-ignored).
-- Nothing else is writable in this phase — on Claude Code the hook
-  blocks spec.md, docs/changes/, and source code; on hosts without the
-  hook the same whitelist binds by discipline. If the design shows the
-  spec itself is wrong, stop and tell the human; changing requirements
-  is their call.
+- Keep all agent-authored output in those paths. Claude Code's hook
+  checks `Write`/`Edit`, not Bash, MCP, NotebookEdit or other writers;
+  missing paths and hook errors fail open (see `mulix-using`). Other hosts
+  rely on discipline. Uncovered writes are not permission to edit the
+  spec, tasks or source here. If the design shows the spec itself is
+  wrong, stop and tell the human; changing requirements is their call.
 
 ## Ending the phase
 

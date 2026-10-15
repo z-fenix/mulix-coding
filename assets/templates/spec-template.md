@@ -1,6 +1,6 @@
 # Feature Specification: [FEATURE NAME]
 
-**Change**: `[###-change-slug]`
+**Change**: `[YYYY-MM-DD-change-slug]`
 
 **Created**: [DATE]
 

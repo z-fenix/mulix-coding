@@ -61,6 +61,15 @@ these mulix specifics:
   writes this under its report contract ("TDD Evidence"). Under inline,
   write it yourself as you finish each task's GREEN step — `task-done`
   keeps the test log but doesn't write the report.
+- **Step status.** After each step actually runs and its expected result
+  is verified, change only its `- [ ]` marker in approved tasks.md to
+  `- [X]` (capital X). This status-only edit is allowed. Keep task numbers,
+  step definitions, code, commands, and all approved content unchanged.
+  Leave future or unperformed steps `[ ]`: passing GREEN does not mean
+  other steps ran. A commit step becomes `[X]` only after an authorized
+  commit actually succeeds; a skipped or unauthorized commit stays `[ ]`
+  and is reported, never bulk-checked. Checkboxes record progress; they
+  do not replace the ledger completion line or RED/GREEN reports.
 - **Keep the workspace.** The executor skills' finish keeps it (the
   build-complete guard reads it); never `rm -rf` it or `git clean` it
   away.
@@ -81,7 +90,8 @@ first line and has a `Task N: complete` line for every `## Task N`
 section, and every task has a report with RED and GREEN evidence. A fix
 round or a Ruling line is not a completion line.
 
-If a task can't be completed as planned, don't edit tasks.md into shape:
-it's the approved plan, and the guard matches the ledger against it.
-Rule on it in the ledger as the executor skill says, or, if the plan is
-broken past ruling, tell the human.
+If a task can't be completed as planned, keep its definitions unchanged;
+only the verified step-status edits above are allowed. The guard matches
+the ledger against the approved tasks. Rule on deviations in the ledger
+as the executor skill says, or, if the plan is broken past ruling, tell
+the human.

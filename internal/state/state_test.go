@@ -97,6 +97,28 @@ func TestLoad_PointsAtLegacyStateLocation(t *testing.T) {
 	}
 }
 
+func TestSave_RejectsSymlinkWithoutChangingTarget(t *testing.T) {
+	root := t.TempDir()
+	original := filepath.Join(root, "original.yaml")
+	if err := os.WriteFile(original, []byte("keep original\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := PathFor(root, "001-x")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(original, path); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := Save(root, flow.New("001-x", "")); err == nil {
+		t.Fatal("Save followed a symlink")
+	}
+	data, err := os.ReadFile(original)
+	if err != nil || string(data) != "keep original\n" {
+		t.Fatalf("symlink target changed: %q, %v", data, err)
+	}
+}
+
 func TestSave_RejectsReservedSharedID(t *testing.T) {
 	if err := Save(t.TempDir(), flow.New("_shared", "")); err == nil {
 		t.Fatal("expected _shared to be rejected as a change id")

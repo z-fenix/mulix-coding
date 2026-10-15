@@ -45,7 +45,7 @@ func SetActive(root, change string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("state: creating .mulix dir: %w", err)
 	}
-	if err := os.WriteFile(path, []byte(strings.TrimSpace(change)+"\n"), 0o644); err != nil {
+	if err := writeStateFile(path, []byte(strings.TrimSpace(change)+"\n")); err != nil {
 		return fmt.Errorf("state: writing active change: %w", err)
 	}
 	return nil

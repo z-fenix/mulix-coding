@@ -175,8 +175,8 @@ func NextEvents(phase Phase) []Event {
 
 // Apply is a pure function: given a state and an event, it returns the new
 // state (a copy) or an error if the event is not legal from the current
-// phase. It does not check guards — callers (the guard package, or the
-// hook) are responsible for gating calls to Apply on guard results. This
+// phase. It does not check guards — the CLI transition command runs the
+// declared guards before Apply (unless --force skips readiness). This
 // mirrors comet's applyClassicTransition: the transition table enforces
 // *structure* (what moves are legal at all), guards enforce *readiness*
 // (whether the artifacts/evidence justify the move right now).

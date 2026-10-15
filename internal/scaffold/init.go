@@ -1,6 +1,7 @@
 package scaffold
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -33,6 +34,7 @@ type InitOptions struct {
 type InitResult struct {
 	Written []string
 	Skipped []string
+	Backups []string
 }
 
 // runtimeGitignore keeps the parts of .mulix/.runtime/ that must never be
@@ -50,15 +52,30 @@ const runtimeGitignore = "# Written by mulix init.\n*/" + layout.BrainstormDir +
 // docs/specs/ — those come from `mulix new`, once there's an actual
 // change to hold. It is idempotent: re-running without --force only
 // fills in what's missing.
-func Init(opts InitOptions) (InitResult, error) {
-	var res InitResult
-
+func Init(opts InitOptions) (res InitResult, err error) {
 	hosts, err := normalizeHosts(opts.Hosts)
 	if err != nil {
 		return res, err
 	}
+	st, err := loadInstallState(opts.Root)
+	if err != nil {
+		return res, err
+	}
+	if len(st.Pending) > 0 {
+		return res, fmt.Errorf("scaffold: unresolved updates exist; use mulix update --accept or --force before reinitializing")
+	}
+	existingHosts, err := installedHosts(opts.Root, st)
+	if err != nil {
+		return res, err
+	}
+	backups := &updateBackups{root: opts.Root}
+	defer func() {
+		if backups.dir != "" {
+			res.Backups = []string{filepath.Join(opts.Root, filepath.FromSlash(backups.dir))}
+		}
+	}()
 
-	if err := writeIfAbsentOrForced(&res, opts, ".mulix/memory/constitution.md", 0o644, func() ([]byte, error) {
+	if err := writeIfAbsentOrForced(&res, opts, st, backups, ".mulix/memory/constitution.md", 0o644, func() ([]byte, error) {
 		return fs.ReadFile(assets.Templates, "templates/constitution-template.md")
 	}); err != nil {
 		return res, err
@@ -69,12 +86,12 @@ func Init(opts InitOptions) (InitResult, error) {
 		return res, fmt.Errorf("scaffold: reading bundled content: %w", err)
 	}
 	for _, f := range files {
-		if err := writeIfAbsentOrForced(&res, opts, f.Rel, f.Mode(), func() ([]byte, error) { return f.Data, nil }); err != nil {
+		if err := writeIfAbsentOrForced(&res, opts, st, backups, f.Rel, f.Mode(), func() ([]byte, error) { return f.Data, nil }); err != nil {
 			return res, err
 		}
 	}
 
-	if err := writeIfAbsentOrForced(&res, opts, path.Join(layout.RuntimeDir, ".gitignore"), 0o644, func() ([]byte, error) {
+	if err := writeIfAbsentOrForced(&res, opts, st, backups, path.Join(layout.RuntimeDir, ".gitignore"), 0o644, func() ([]byte, error) {
 		return []byte(runtimeGitignore), nil
 	}); err != nil {
 		return res, err
@@ -105,31 +122,75 @@ func Init(opts InitOptions) (InitResult, error) {
 		}
 	}
 
+	seen := map[Host]bool{}
+	for _, host := range append(existingHosts, hosts...) {
+		seen[host] = true
+	}
+	st.Hosts = nil
+	for _, host := range allHosts {
+		if seen[host] {
+			st.Hosts = append(st.Hosts, host)
+		}
+	}
+	if err := saveInstallState(opts.Root, st); err != nil {
+		return res, err
+	}
 	return res, nil
 }
 
-// writeIfAbsentOrForced writes content() to root/relPath unless the file
-// already exists and Force is false, in which case it's recorded as
-// skipped instead of silently left alone with no report at all. Every
-// file mulix writes also gets a baseline copy under .mulix/.installed/ —
-// the common ancestor `mulix update` later three-way merges against.
-func writeIfAbsentOrForced(res *InitResult, opts InitOptions, relPath string, mode fs.FileMode, content func() ([]byte, error)) error {
-	full := filepath.Join(opts.Root, filepath.FromSlash(relPath))
-	if _, err := os.Stat(full); err == nil && !opts.Force {
-		res.Skipped = append(res.Skipped, relPath)
-		return nil
-	}
+// writeIfAbsentOrForced registers only bytes proven to equal bundled content.
+// A skipped custom file keeps its old record; it is never newly claimed.
+func writeIfAbsentOrForced(res *InitResult, opts InitOptions, st *installState, backups *updateBackups, relPath string, mode fs.FileMode, content func() ([]byte, error)) error {
 	data, err := content()
 	if err != nil {
 		return fmt.Errorf("scaffold: reading bundled content for %s: %w", relPath, err)
 	}
-	if err := writeFileMode(full, data, mode); err != nil {
-		return fmt.Errorf("scaffold: writing %s: %w", relPath, err)
+	local, exists, err := readInstalledFile(opts.Root, relPath)
+	if err != nil {
+		return err
 	}
-	if err := writeFile(baselinePath(opts.Root, relPath), data); err != nil {
-		return fmt.Errorf("scaffold: writing baseline for %s: %w", relPath, err)
+	managed := validManagedRel(relPath)
+	if exists && !opts.Force && (!managed || !bytes.Equal(local, data)) {
+		res.Skipped = append(res.Skipped, relPath)
+		return nil
 	}
-	res.Written = append(res.Written, relPath)
+	base, hasBase, err := readInstalledFile(opts.Root, ".mulix/.installed/"+relPath)
+	if err != nil {
+		return err
+	}
+	if (exists && !bytes.Equal(local, data)) || (hasBase && !bytes.Equal(base, data)) {
+		if err := backups.preserve(relPath); err != nil {
+			return err
+		}
+	}
+	full, err := projectFilePath(opts.Root, relPath)
+	if err != nil {
+		return err
+	}
+	if !exists || opts.Force {
+		if err := writeFileMode(full, data, mode); err != nil {
+			return fmt.Errorf("scaffold: writing %s: %w", relPath, err)
+		}
+	}
+	if !hasBase || !bytes.Equal(base, data) {
+		if err := writeFile(baselinePath(opts.Root, relPath), data); err != nil {
+			return fmt.Errorf("scaffold: writing baseline for %s: %w", relPath, err)
+		}
+	}
+	if managed {
+		record := vendorRecord{SHA256: contentDigest(data)}
+		if st.Files[managedMapKey(st.Files, relPath)] != record {
+			st.Files[managedMapKey(st.Files, relPath)] = record
+			if err := saveInstallState(opts.Root, st); err != nil {
+				return err
+			}
+		}
+	}
+	if exists && !opts.Force {
+		res.Skipped = append(res.Skipped, relPath)
+	} else {
+		res.Written = append(res.Written, relPath)
+	}
 	return nil
 }
 

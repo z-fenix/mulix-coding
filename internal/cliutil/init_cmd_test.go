@@ -16,7 +16,7 @@ func TestInitCmd_HostDSHInstallsDSHTree(t *testing.T) {
 	}
 
 	for _, rel := range []string{
-		filepath.Join(".dsh", "skills", "using-mulix", "SKILL.md"),
+		filepath.Join(".dsh", "skills", "mulix-using", "SKILL.md"),
 		filepath.Join(".dsh", "skills", "brainstorming", "SKILL.md"),
 		filepath.Join("AGENTS.md"),
 	} {
@@ -65,8 +65,8 @@ func TestInitCmd_BothHosts(t *testing.T) {
 		t.Fatalf("init --host claude,dsh: %v (output: %s)", err, out)
 	}
 	for _, rel := range []string{
-		filepath.Join(".claude", "skills", "using-mulix", "SKILL.md"),
-		filepath.Join(".dsh", "skills", "using-mulix", "SKILL.md"),
+		filepath.Join(".claude", "skills", "mulix-using", "SKILL.md"),
+		filepath.Join(".dsh", "skills", "mulix-using", "SKILL.md"),
 		filepath.Join(".claude", "settings.json"),
 		filepath.Join("AGENTS.md"),
 	} {

@@ -26,7 +26,7 @@ func TestInit_WritesExpectedFiles(t *testing.T) {
 		".mulix/memory/constitution.md",
 		".mulix/templates/spec-template.md",
 		".claude/skills/mulix-build/SKILL.md",
-		".claude/skills/using-mulix/SKILL.md",
+		".claude/skills/mulix-using/SKILL.md",
 		".claude/skills/brainstorming/SKILL.md",
 		".claude/skills/brainstorming/scripts/start-server.sh",
 		".claude/skills/test-driven-development/SKILL.md",
@@ -196,7 +196,7 @@ func TestInit_DefaultHostsAreClaudeOnly(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".claude", "settings.json")); err != nil {
 		t.Errorf("expected the Claude hook settings to exist: %v", err)
 	}
-	for _, rel := range []string{".dsh/skills/using-mulix/SKILL.md", "AGENTS.md"} {
+	for _, rel := range []string{".dsh/skills/mulix-using/SKILL.md", "AGENTS.md"} {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); !os.IsNotExist(err) {
 			t.Errorf("expected %s to not exist on a claude-only init", rel)
 		}
@@ -212,7 +212,7 @@ func TestInit_HostDSHInstallsDSHTreeAndBootstrap(t *testing.T) {
 
 	for _, rel := range []string{
 		".dsh/skills/mulix-build/SKILL.md",
-		".dsh/skills/using-mulix/SKILL.md",
+		".dsh/skills/mulix-using/SKILL.md",
 		".dsh/skills/brainstorming/SKILL.md",
 		".dsh/skills/test-driven-development/SKILL.md",
 		".dsh/skills/subagent-driven-development/scripts/sdd-workspace",
@@ -233,9 +233,9 @@ func TestInit_HostDSHInstallsDSHTreeAndBootstrap(t *testing.T) {
 	// mulix's own skills are host-aware: the placeholder must be replaced
 	// with the DSH skills directory, and the vendored superpowers skills
 	// must be verbatim.
-	usingMulix := readProjectFile(t, root, ".dsh/skills/using-mulix/SKILL.md")
+	usingMulix := readProjectFile(t, root, ".dsh/skills/mulix-using/SKILL.md")
 	if !strings.Contains(usingMulix, "`.dsh/skills/`") {
-		t.Error("expected using-mulix to name the DSH skills directory")
+		t.Error("expected mulix-using to name the DSH skills directory")
 	}
 	if strings.Contains(usingMulix, SkillsDirPlaceholder) {
 		t.Error("expected no placeholder to survive substitution")
@@ -258,7 +258,7 @@ func TestInit_HostDSHInstallsDSHTreeAndBootstrap(t *testing.T) {
 	}
 
 	// Baselines are recorded for the DSH tree so update can manage it.
-	if _, err := os.Stat(filepath.Join(root, ".mulix", ".installed", ".dsh", "skills", "using-mulix", "SKILL.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, ".mulix", ".installed", ".dsh", "skills", "mulix-using", "SKILL.md")); err != nil {
 		t.Errorf("expected a baseline for the DSH tree: %v", err)
 	}
 
@@ -297,8 +297,8 @@ func TestInit_BothHostsInstallBothTrees(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 	for _, rel := range []string{
-		".claude/skills/using-mulix/SKILL.md",
-		".dsh/skills/using-mulix/SKILL.md",
+		".claude/skills/mulix-using/SKILL.md",
+		".dsh/skills/mulix-using/SKILL.md",
 		".claude/settings.json",
 		"AGENTS.md",
 	} {
@@ -306,16 +306,93 @@ func TestInit_BothHostsInstallBothTrees(t *testing.T) {
 			t.Errorf("expected %s to exist: %v", rel, err)
 		}
 	}
-	claude := readProjectFile(t, root, ".claude/skills/using-mulix/SKILL.md")
+	claude := readProjectFile(t, root, ".claude/skills/mulix-using/SKILL.md")
 	if !strings.Contains(claude, "`.claude/skills/`") {
 		t.Error("expected the claude copy to name the claude skills dir")
 	}
-	dsh := readProjectFile(t, root, ".dsh/skills/using-mulix/SKILL.md")
+	dsh := readProjectFile(t, root, ".dsh/skills/mulix-using/SKILL.md")
 	if !strings.Contains(dsh, "`.dsh/skills/`") {
 		t.Error("expected the dsh copy to name the dsh skills dir")
 	}
 	if claude == dsh {
 		t.Error("expected the two installed copies to differ in their skills dir")
+	}
+}
+
+func TestInit_ForceStopsWhenBackupCannotBeCreated(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Init(InitOptions{Root: root}); err != nil {
+		t.Fatal(err)
+	}
+	rel := ".mulix/templates/spec-template.md"
+	writeProjectFile(t, root, rel, "KEEP LOCAL\n")
+	writeProjectFile(t, root, ".mulix/.backups", "not a directory\n")
+	if _, err := Init(InitOptions{Root: root, Force: true}); err == nil {
+		t.Fatal("force succeeded despite backup failure")
+	}
+	if got := readProjectFile(t, root, rel); got != "KEEP LOCAL\n" {
+		t.Fatalf("local overwritten: %q", got)
+	}
+}
+
+func TestInit_SkippedCustomFileIsNotTrusted(t *testing.T) {
+	root := t.TempDir()
+	rel := ".mulix/templates/spec-template.md"
+	writeProjectFile(t, root, rel, "CUSTOM\n")
+	writeProjectFile(t, root, ".mulix/.installed/"+rel, "CUSTOM\n")
+	if _, err := Init(InitOptions{Root: root}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := loadInstallState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st.Files[rel]; ok {
+		t.Fatal("skipped custom file was trusted")
+	}
+	if got := readProjectFile(t, root, ".mulix/.installed/"+rel); got != "CUSTOM\n" {
+		t.Fatal("unknown baseline was changed")
+	}
+}
+
+func TestInit_RegistersPureVendorTrust(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Init(InitOptions{Root: root}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := loadInstallState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel := ".mulix/templates/spec-template.md"
+	vendor := readProjectFile(t, root, rel)
+	if st.Files[rel].SHA256 != contentDigest([]byte(vendor)) {
+		t.Fatal("installed vendor not registered")
+	}
+	for _, seed := range []string{".mulix/memory/constitution.md", ".mulix/.runtime/.gitignore"} {
+		if _, ok := st.Files[seed]; ok {
+			t.Fatalf("seed became an updater file: %s", seed)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, ".mulix", ".backups")); !os.IsNotExist(err) {
+		t.Fatalf("fresh init made backup: %v", err)
+	}
+}
+
+func TestInit_AddingHostsPreservesUnion(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Init(InitOptions{Root: root, Hosts: []Host{HostDSH}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Init(InitOptions{Root: root, Hosts: []Host{HostClaude}}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := loadInstallState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Hosts) != 2 || st.Hosts[0] != HostClaude || st.Hosts[1] != HostDSH {
+		t.Fatalf("hosts = %v", st.Hosts)
 	}
 }
 

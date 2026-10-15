@@ -21,7 +21,7 @@ var Version = "dev"
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "mulix",
-		Short:         "mulix-coding: spec-driven development with enforced phase gates for Claude Code",
+		Short:         "mulix-coding: spec-driven development with phase gates for Claude Code and DeepSeek Harness",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
