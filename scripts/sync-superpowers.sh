@@ -114,6 +114,10 @@ patch "$sp/writing-plans/SKILL.md" 's{^### Task N: \[Component Name\]$}{## Task 
 patch "$sp/writing-plans/SKILL.md" 's{\n## Execution Handoff\n.*\z}{\n}s'
 patch "$sp/writing-plans/SKILL.md" 's{\*\*Save plans to:\*\* `docs/changes/<change>/YYYY-MM-DD-<feature-name>\.md`\n- \(User preferences for plan location override this default\)}{**Save plans to:** `docs/changes/<change>/tasks.md` — the mulix tasks phase\x27s artifact, which the build phase executes and the build-complete guard checks against.}g'
 
+# Keep runtime task formatting and status synchronization across upstream syncs.
+patch "$sp/executing-plans/SKILL.md" 's/- Check for this plan\x27s ledger at `<workspace>\/progress\.md`\. If its first\n  line names your plan file, tasks with a `Task <N>: complete` line are\n  DONE — do not redo them; resume at the first task without one\. Their\n/- Check for this plan\x27s ledger at `<workspace>\/progress.md`. If its first\n  line names your plan file, tasks with a `- Task <N>: complete` line are\n  DONE — do not redo them; resume at the first task without one. Their\n/'
+patch "$sp/subagent-driven-development/SKILL.md" 's/- Check for this plan\x27s ledger at `<workspace>\/progress\.md`\. If its first\n  line names your plan file, tasks with a `Task <N>: complete` line are DONE\n  — do not re-dispatch them; resume at the first task without one\. A task\n/- Check for this plan\x27s ledger at `<workspace>\/progress.md`. If its first\n  line names your plan file, tasks with a `- Task <N>: complete` line are DONE\n  — do not re-dispatch them; resume at the first task without one. A task\n/'
+
 # Nothing may still point at the upstream locations.
 if grep -rnE '\.superpowers/|docs/superpowers/|superpowers:[a-z]' "$sp"; then
   echo "sync-superpowers: upstream paths/references survived the rewrite (see above)" >&2
