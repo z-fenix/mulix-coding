@@ -39,10 +39,10 @@ func TaskNumbers(tasksMD string) []int {
 	return out
 }
 
-// ledgerCompleteRe matches a ledger completion line: "Task 3: complete
-// (commits ..., ...)". Fix-round and ruling lines ("Task 3: fix round
-// 1/5", "Task 3: Ruling: ...") are deliberately not matches.
-var ledgerCompleteRe = regexp.MustCompile(`^Task[ \t]+([0-9]+):[ \t]+complete\b`)
+// ledgerCompleteRe matches a list item or legacy plain completion line:
+// "- Task 3: complete (commits ..., ...)". Fix-round and ruling lines
+// ("Task 3: fix round 1/5", "Task 3: Ruling: ...") are not matches.
+var ledgerCompleteRe = regexp.MustCompile(`^(?:-[ \t]+)?Task[ \t]+([0-9]+):[ \t]+complete\b`)
 
 // CompletedTasks returns the set of task numbers the ledger records as
 // complete.

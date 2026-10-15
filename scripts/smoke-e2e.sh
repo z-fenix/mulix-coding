@@ -102,7 +102,10 @@ cat > "docs/changes/$c/tasks.md" <<'EOF'
 
 ```markdown
 ## Task 9: an example heading inside a fence is not a task
+- [ ] **Step 1: An example, not an executed step**
 ```
+
+- [ ] **Step 5: Commit (not authorized in this fixture)**
 
 ## Task 2: CLI
 
@@ -125,8 +128,40 @@ grep -q "Task 9" "$ws/task-1-brief.md"   # fenced example stays inside Task 1's 
 expect_fail mulix state transition build-complete   # no execution method, no ledger
 mulix state set execution_method inline >/dev/null
 base=$(git rev-parse HEAD)
+# Simulate only the verified Step 1 status edit in the approved source.
+# The existing brief is deliberately stale; fenced examples stay unchecked.
+perl -0777 -pi -e 's/\Q- [ ] **Step 1: Write the failing test**\E/- [X] **Step 1: Write the failing test**/' "docs/changes/$c/tasks.md"
+cp "$ws/task-1-brief.md" "$work/brief-before.md"
 echo "package main" > main.go && git add main.go && git commit -qm "task 1"
-bash .claude/skills/executing-plans/scripts/task-done "docs/changes/$c/tasks.md" 1 "$base" -- echo "ok  greet  0.01s" >/dev/null
+done_script=.claude/skills/executing-plans/scripts/task-done
+rc=0
+bash "$done_script" "docs/changes/$c/tasks.md" 1 "$base" -- bash -c 'printf "expected failure\n"; exit 7' >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 7 ]
+test ! -f "$ws/progress.md"
+cmp "$work/brief-before.md" "$ws/task-1-brief.md"
+grep -q 'expected failure' "$ws/task-1-tests.log"
+bash "$done_script" "docs/changes/$c/tasks.md" 1 "$base" -- echo "ok  greet  0.01s" >/dev/null
+# Compare the entire refreshed brief, not just the presence of an X marker.
+cat > "$work/brief-expected.md" <<'EOF'
+## Task 1: Greeter
+
+- [X] **Step 1: Write the failing test**
+
+```markdown
+## Task 9: an example heading inside a fence is not a task
+- [ ] **Step 1: An example, not an executed step**
+```
+
+- [ ] **Step 5: Commit (not authorized in this fixture)**
+
+EOF
+cmp "$work/brief-expected.md" "$ws/task-1-brief.md"
+[ "$(sed -n '2p' "$ws/progress.md")" = "" ]
+grep -q '^- Task 1: complete ' "$ws/progress.md"
+# Successful tests cannot record a task whose brief cannot be extracted.
+cp "$ws/progress.md" "$work/ledger-before.md"
+expect_fail bash "$done_script" "docs/changes/$c/tasks.md" 99 "$base" -- true
+cmp "$work/ledger-before.md" "$ws/progress.md"
 expect_fail mulix state transition build-complete   # Task 2 not done, no reports
 base=$(git rev-parse HEAD)
 echo "// cli" >> main.go && git commit -qam "task 2"
