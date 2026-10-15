@@ -37,7 +37,7 @@ func readProjectFile(t *testing.T, root, relPath string) string {
 func TestUpdateFile_WritesMissingFileAndBaseline(t *testing.T) {
 	root := t.TempDir()
 	var res UpdateResult
-	if err := updateFile(&res, UpdateOptions{Root: root}, ".mulix/templates/new.md", "v2\n"); err != nil {
+	if err := updateManagedFileForTest(t, &res, UpdateOptions{Root: root}, ".mulix/templates/new.md", "v2\n"); err != nil {
 		t.Fatalf("updateFile: %v", err)
 	}
 	if len(res.Written) != 1 || res.Written[0] != ".mulix/templates/new.md" {
@@ -54,11 +54,11 @@ func TestUpdateFile_WritesMissingFileAndBaseline(t *testing.T) {
 func TestUpdateFile_SkipsWhenAlreadyCurrent(t *testing.T) {
 	root := t.TempDir()
 	var res UpdateResult
-	if err := updateFile(&res, UpdateOptions{Root: root}, ".mulix/templates/new.md", "v2\n"); err != nil {
+	if err := updateManagedFileForTest(t, &res, UpdateOptions{Root: root}, ".mulix/templates/new.md", "v2\n"); err != nil {
 		t.Fatalf("updateFile: %v", err)
 	}
 	res = UpdateResult{}
-	if err := updateFile(&res, UpdateOptions{Root: root}, ".mulix/templates/new.md", "v2\n"); err != nil {
+	if err := updateManagedFileForTest(t, &res, UpdateOptions{Root: root}, ".mulix/templates/new.md", "v2\n"); err != nil {
 		t.Fatalf("updateFile: %v", err)
 	}
 	if len(res.Skipped) != 1 {
@@ -69,20 +69,20 @@ func TestUpdateFile_SkipsWhenAlreadyCurrent(t *testing.T) {
 func TestUpdateFile_UpdatesUnmodifiedFile(t *testing.T) {
 	root := t.TempDir()
 	var res UpdateResult
-	if err := updateFile(&res, UpdateOptions{Root: root}, "x.md", "v1\n"); err != nil {
+	if err := updateManagedFileForTest(t, &res, UpdateOptions{Root: root}, unitRel, "v1\n"); err != nil {
 		t.Fatal(err)
 	}
 	res = UpdateResult{}
-	if err := updateFile(&res, UpdateOptions{Root: root}, "x.md", "v2\n"); err != nil {
+	if err := updateManagedFileForTest(t, &res, UpdateOptions{Root: root}, unitRel, "v2\n"); err != nil {
 		t.Fatal(err)
 	}
 	if len(res.Updated) != 1 {
 		t.Fatalf("expected updated report, got %+v", res)
 	}
-	if got := readProjectFile(t, root, "x.md"); got != "v2\n" {
+	if got := readProjectFile(t, root, unitRel); got != "v2\n" {
 		t.Fatalf("file = %q, want v2", got)
 	}
-	if got := readProjectFile(t, root, ".mulix/.installed/x.md"); got != "v2\n" {
+	if got := readProjectFile(t, root, ".mulix/.installed/"+unitRel); got != "v2\n" {
 		t.Fatalf("baseline = %q, want v2", got)
 	}
 }
@@ -90,58 +90,58 @@ func TestUpdateFile_UpdatesUnmodifiedFile(t *testing.T) {
 func TestUpdateFile_MergesLocallyModifiedFile(t *testing.T) {
 	root := t.TempDir()
 	var res UpdateResult
-	if err := updateFile(&res, UpdateOptions{Root: root}, "x.md", "a\nb\nc\n"); err != nil {
+	if err := updateManagedFileForTest(t, &res, UpdateOptions{Root: root}, unitRel, "a\nb\nc\n"); err != nil {
 		t.Fatal(err)
 	}
 	// user edits the tail; incoming changes the head — disjoint
-	writeProjectFile(t, root, "x.md", "a\nb\nlocal edit\n")
+	writeProjectFile(t, root, unitRel, "a\nb\nlocal edit\n")
 	res = UpdateResult{}
-	if err := updateFile(&res, UpdateOptions{Root: root}, "x.md", "mulix edit\nb\nc\n"); err != nil {
+	if err := updateManagedFileForTest(t, &res, UpdateOptions{Root: root}, unitRel, "mulix edit\nb\nc\n"); err != nil {
 		t.Fatal(err)
 	}
 	if len(res.Merged) != 1 {
 		t.Fatalf("expected merged report, got %+v", res)
 	}
-	got := readProjectFile(t, root, "x.md")
+	got := readProjectFile(t, root, unitRel)
 	want := "mulix edit\nb\nlocal edit\n"
 	if got != want {
 		t.Fatalf("merged = %q, want %q", got, want)
 	}
 }
 
-func TestUpdateFile_ConflictingChangeWritesMarkers(t *testing.T) {
+func TestUpdateFile_ConflictingChangePreservesLocalAndBaseline(t *testing.T) {
 	root := t.TempDir()
 	var res UpdateResult
-	if err := updateFile(&res, UpdateOptions{Root: root}, "x.md", "a\nb\nc\n"); err != nil {
+	if err := updateManagedFileForTest(t, &res, UpdateOptions{Root: root}, unitRel, "a\nb\nc\n"); err != nil {
 		t.Fatal(err)
 	}
-	writeProjectFile(t, root, "x.md", "a\nlocal\nc\n")
+	writeProjectFile(t, root, unitRel, "a\nlocal\nc\n")
 	res = UpdateResult{}
-	if err := updateFile(&res, UpdateOptions{Root: root}, "x.md", "a\nincoming\nc\n"); err != nil {
+	if err := updateManagedFileForTest(t, &res, UpdateOptions{Root: root}, unitRel, "a\nincoming\nc\n"); err != nil {
 		t.Fatal(err)
 	}
 	if len(res.Conflicted) != 1 {
 		t.Fatalf("expected conflicted report, got %+v", res)
 	}
-	got := readProjectFile(t, root, "x.md")
-	for _, want := range []string{"<<<<<<<", "incoming", "=======", "local", ">>>>>>>"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("expected conflict markers containing %q, got:\n%s", want, got)
-		}
+	if got := readProjectFile(t, root, unitRel); got != "a\nlocal\nc\n" {
+		t.Fatalf("conflict changed local: %q", got)
+	}
+	if got := readProjectFile(t, root, ".mulix/.installed/"+unitRel); got != "a\nb\nc\n" {
+		t.Fatalf("conflict changed baseline: %q", got)
 	}
 }
 
 func TestUpdateFile_SkipsWithoutBaseline(t *testing.T) {
 	root := t.TempDir()
-	writeProjectFile(t, root, "x.md", "user edited, no baseline\n")
+	writeProjectFile(t, root, unitRel, "user edited, no baseline\n")
 	var res UpdateResult
-	if err := updateFile(&res, UpdateOptions{Root: root}, "x.md", "v2\n"); err != nil {
+	if err := updateManagedFileForTest(t, &res, UpdateOptions{Root: root}, unitRel, "v2\n"); err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Skipped) != 1 {
-		t.Fatalf("expected skip without baseline, got %+v", res)
+	if len(res.Blocked) != 1 || !res.NeedsAttention() {
+		t.Fatalf("expected blocked without baseline, got %+v", res)
 	}
-	if got := readProjectFile(t, root, "x.md"); got != "user edited, no baseline\n" {
+	if got := readProjectFile(t, root, unitRel); got != "user edited, no baseline\n" {
 		t.Fatalf("file must be untouched, got %q", got)
 	}
 }
@@ -149,21 +149,21 @@ func TestUpdateFile_SkipsWithoutBaseline(t *testing.T) {
 func TestUpdateFile_ForceOverwritesAndRebaselines(t *testing.T) {
 	root := t.TempDir()
 	var res UpdateResult
-	if err := updateFile(&res, UpdateOptions{Root: root}, "x.md", "v1\n"); err != nil {
+	if err := updateManagedFileForTest(t, &res, UpdateOptions{Root: root}, unitRel, "v1\n"); err != nil {
 		t.Fatal(err)
 	}
-	writeProjectFile(t, root, "x.md", "user edit\n")
+	writeProjectFile(t, root, unitRel, "user edit\n")
 	res = UpdateResult{}
-	if err := updateFile(&res, UpdateOptions{Root: root, Force: true}, "x.md", "v2\n"); err != nil {
+	if err := updateManagedFileForTest(t, &res, UpdateOptions{Root: root, Force: true}, unitRel, "v2\n"); err != nil {
 		t.Fatal(err)
 	}
 	if len(res.Updated) != 1 {
 		t.Fatalf("expected updated under force, got %+v", res)
 	}
-	if got := readProjectFile(t, root, "x.md"); got != "v2\n" {
+	if got := readProjectFile(t, root, unitRel); got != "v2\n" {
 		t.Fatalf("file = %q, want v2", got)
 	}
-	if got := readProjectFile(t, root, ".mulix/.installed/x.md"); got != "v2\n" {
+	if got := readProjectFile(t, root, ".mulix/.installed/"+unitRel); got != "v2\n" {
 		t.Fatalf("baseline = %q, want v2", got)
 	}
 }
@@ -247,6 +247,7 @@ func TestUpdate_RemovesUntouchedObsoleteFileKeepsModifiedOne(t *testing.T) {
 	for _, rel := range []string{".claude/skills/mulix-plan/SKILL.md", ".mulix/templates/analyze-template.md"} {
 		writeProjectFile(t, root, rel, "old\n")
 		writeProjectFile(t, root, ".mulix/.installed/"+rel, "old\n")
+		recordVendorForTest(t, root, rel, "old\n")
 	}
 	writeProjectFile(t, root, ".mulix/templates/analyze-template.md", "user edit\n")
 
@@ -276,6 +277,7 @@ func TestUpdate_RemovesFileUpstreamNoLongerShips(t *testing.T) {
 	staleRel := ".claude/skills/writing-plans/plan-document-reviewer-prompt.md"
 	writeProjectFile(t, root, staleRel, "old prompt\n")
 	writeProjectFile(t, root, ".mulix/.installed/"+staleRel, "old prompt\n")
+	recordVendorForTest(t, root, staleRel, "old prompt\n")
 
 	res, err := Update(UpdateOptions{Root: root})
 	if err != nil {
@@ -338,6 +340,7 @@ func TestUpdate_DerivesDSHHostFromBaselines(t *testing.T) {
 	staleRel := ".dsh/skills/mulix-build/SKILL.md"
 	writeProjectFile(t, root, staleRel, oldVersion)
 	writeProjectFile(t, root, ".mulix/.installed/"+staleRel, oldVersion)
+	recordVendorForTest(t, root, staleRel, oldVersion)
 
 	// And a deleted skill file: update rewrites it from the bundle.
 	missingRel := ".dsh/skills/mulix-specify/SKILL.md"
@@ -394,6 +397,41 @@ func TestUpdate_DerivesDSHHostFromBaselines(t *testing.T) {
 	}
 }
 
+func TestUpdate_ThreeRunsKeepLocalAndPureBaseline(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Init(InitOptions{Root: root}); err != nil {
+		t.Fatal(err)
+	}
+	rel := ".mulix/templates/spec-template.md"
+	vendor := readProjectFile(t, root, rel)
+	local := vendor + "\nLOCAL RULE\n"
+	writeProjectFile(t, root, rel, local)
+	for i := 0; i < 3; i++ {
+		if _, err := Update(UpdateOptions{Root: root}); err != nil {
+			t.Fatal(err)
+		}
+		if got := readProjectFile(t, root, rel); got != local {
+			t.Fatalf("run %d lost local", i+1)
+		}
+		if got := readProjectFile(t, root, ".mulix/.installed/"+rel); got != vendor {
+			t.Fatalf("run %d polluted baseline", i+1)
+		}
+	}
+}
+
+func TestUpdate_DSHOnlyNeverCreatesClaude(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Init(InitOptions{Root: root, Hosts: []Host{HostDSH}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Update(UpdateOptions{Root: root}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".claude")); !os.IsNotExist(err) {
+		t.Fatalf("unexpected Claude tree: %v", err)
+	}
+}
+
 func TestUpdate_ClaudeOnlyProjectNeverGetsDSH(t *testing.T) {
 	root := t.TempDir()
 	if _, err := Init(InitOptions{Root: root}); err != nil {
@@ -404,7 +442,7 @@ func TestUpdate_ClaudeOnlyProjectNeverGetsDSH(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	for _, rel := range []string{".dsh/skills/using-mulix/SKILL.md", "AGENTS.md"} {
+	for _, rel := range []string{".dsh/skills/mulix-using/SKILL.md", "AGENTS.md"} {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); !os.IsNotExist(err) {
 			t.Errorf("expected update to not create %s in a claude-only project", rel)
 		}

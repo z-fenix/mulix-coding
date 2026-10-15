@@ -39,6 +39,28 @@ func TestFindRoot_NoMulixDirErrors(t *testing.T) {
 	}
 }
 
+func TestSetActive_RejectsSymlinkWithoutChangingTarget(t *testing.T) {
+	root := t.TempDir()
+	original := filepath.Join(root, "original-active")
+	if err := os.WriteFile(original, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(root, ".mulix", "active")
+	if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(original, marker); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := SetActive(root, "new"); err == nil {
+		t.Fatal("SetActive followed a symlink")
+	}
+	data, err := os.ReadFile(original)
+	if err != nil || string(data) != "old\n" {
+		t.Fatalf("symlink target changed: %q, %v", data, err)
+	}
+}
+
 func TestSetActiveThenActive(t *testing.T) {
 	root := t.TempDir()
 	if err := SetActive(root, "add-login"); err != nil {

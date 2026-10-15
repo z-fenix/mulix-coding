@@ -11,10 +11,12 @@ its menu exactly as written (merge locally / push and open a PR / keep
 as-is — discarding only on an explicit request), and carry out the
 human's choice.
 
-This phase writes nothing. On Claude Code the PreToolUse hook blocks
-Write/Edit here; on hosts without the hook the rule still binds — treat
-every project write as out of bounds. The finishing skill works through
-git commands, which were never gated. Commit the
+Do not author project files in this phase. Claude Code's PreToolUse
+hook checks `Write`/`Edit`, not Bash, MCP, NotebookEdit or other writers;
+missing paths and hook errors fail open (see `mulix-using`). Hosts without
+the hook rely on discipline. This is not a sandbox or permission to route
+around the whitelist. Authorized finishing uses git/CLI commands, which
+are not gated by this hook. Commit the
 change's record before integrating: `docs/specs/<change>/`,
 `docs/changes/<change>/`, and `.mulix/.runtime/<change>/` (its state,
 design doc, and execution workspace — the visual-companion sessions are
@@ -28,6 +30,7 @@ mulix state set archive_confirmation confirmed
 mulix state transition archived
 ```
 
-The guard requires `archive_confirmation=confirmed`; there is no path
-that reaches `archived` without it. Archiving clears the active-change
-marker.
+The normal guard requires `archive_confirmation=confirmed`; it checks the
+recorded value, not the authenticity of the human's choice. Transition
+`--force` skips this readiness guard, not the phase table, and must not be
+used to conceal missing consent. Archiving clears the active-change marker.

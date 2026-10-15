@@ -1,7 +1,5 @@
-// Package scaffold creates the on-disk layout for a new change (numbered
-// spec and change directories) and, separately, materializes mulix's
-// project-level files (.mulix/, .claude/skills, .claude/settings.json
-// hooks) into a target project.
+// Package scaffold materializes project resources and allocates date-named
+// specification, change and runtime directories without migrating old IDs.
 package scaffold
 
 import (
@@ -9,14 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
+	"time"
 
 	"github.com/z-fenix/mulix-coding/internal/layout"
 )
 
-// SpecsDir and ChangesDir re-export internal/layout's names so existing
-// scaffold callers keep one import.
 const (
 	SpecsDir   = layout.SpecsDir
 	ChangesDir = layout.ChangesDir
@@ -24,118 +20,100 @@ const (
 
 var nonSlugChars = regexp.MustCompile(`[^a-z0-9]+`)
 
-// Slugify lowercases s and collapses runs of non-alphanumeric characters
-// into single hyphens, trimming leading/trailing hyphens. Empty input (or
-// input that slugifies to empty) is rejected by the caller, not here.
+// Slugify keeps the existing lower-case ASCII slug policy.
 func Slugify(s string) string {
 	s = strings.ToLower(s)
 	s = nonSlugChars.ReplaceAllString(s, "-")
 	return strings.Trim(s, "-")
 }
 
-// numberedDirRe matches the "NNN-" numbering prefix used for change
-// directories.
-var numberedDirRe = regexp.MustCompile(`^(\d+)-`)
-
-// NextNumber scans root/changes for existing "NNN-*" directories and
-// returns the next unused number, starting at 1. A missing changes
-// directory yields 1. It scans ChangesDir rather than SpecsDir because a
-// change directory is created for every change from the moment `mulix
-// new` runs, while the spec directory only appears once spec.md is
-// actually written.
-func NextNumber(root string) (int, error) {
-	dir := filepath.Join(root, ChangesDir)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 1, nil
-		}
-		return 0, fmt.Errorf("scaffold: reading %s: %w", dir, err)
-	}
-	max := 0
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		m := numberedDirRe.FindStringSubmatch(e.Name())
-		if m == nil {
-			continue
-		}
-		n, err := strconv.Atoi(m[1])
-		if err != nil {
-			continue
-		}
-		if n > max {
-			max = n
-		}
-	}
-	return max + 1, nil
-}
-
-// ChangeID builds the "NNN-slug" change identifier used as both
-// directories' name and as the state file's change id.
-func ChangeID(number int, slug string) string {
-	return fmt.Sprintf("%03d-%s", number, slug)
-}
-
-// NewChange is the result of creating a new change's artifact
-// directories.
 type NewChange struct {
-	Change string // e.g. "001-add-login"
-
-	SpecDir    string // root-relative, e.g. "docs/specs/001-add-login"
-	SpecAbsDir string
-
-	ChangeDir    string // root-relative, e.g. "docs/changes/001-add-login"
+	Change       string // e.g. 2026-10-14-add-login
+	SpecDir      string // root-relative
+	SpecAbsDir   string
+	ChangeDir    string // root-relative
 	ChangeAbsDir string
-
-	RuntimeDir string // root-relative, e.g. ".mulix/.runtime/001-add-login"
-
-	Slug   string
-	Number int
+	RuntimeDir   string // root-relative
+	Slug         string
 }
 
-// CreateChangeDir allocates the next number for title, slugifies it, and
-// creates the (empty) docs/specs/<NNN-slug>/, docs/changes/<NNN-slug>/,
-// and .mulix/.runtime/<NNN-slug>/ directories under root. It does not
-// write spec.md or any other artifact — that happens in the specify
-// phase.
+// CreateChangeDir captures the local date once. Artifact filenames remain
+// spec.md/tasks.md/report.md; their phase skills create them later.
 func CreateChangeDir(root, title string) (NewChange, error) {
+	return createChangeDirAt(root, title, time.Now())
+}
+
+func changeCandidate(date, slug string, attempt int) string {
+	base := date + "-" + slug
+	if attempt == 1 {
+		return base
+	}
+	return fmt.Sprintf("%s-%d", base, attempt)
+}
+
+func createChangeDirAt(root, title string, now time.Time) (NewChange, error) {
 	slug := Slugify(title)
 	if slug == "" {
 		return NewChange{}, fmt.Errorf("scaffold: %q has no usable slug characters", title)
 	}
-	number, err := NextNumber(root)
-	if err != nil {
-		return NewChange{}, err
+	date := now.Format("2006-01-02")
+	for _, parent := range []string{layout.RuntimeDir, SpecsDir, ChangesDir} {
+		probe, err := projectFilePath(root, parent+"/.probe")
+		if err != nil {
+			return NewChange{}, err
+		}
+		if err := os.MkdirAll(filepath.Dir(probe), 0o755); err != nil {
+			return NewChange{}, fmt.Errorf("scaffold: creating %s: %w", parent, err)
+		}
 	}
-	change := ChangeID(number, slug)
-
-	runtimeAbsDir := filepath.Join(root, filepath.FromSlash(layout.ChangeRuntimeDir(change)))
-	if err := os.MkdirAll(runtimeAbsDir, 0o755); err != nil {
-		return NewChange{}, fmt.Errorf("scaffold: creating %s: %w", layout.ChangeRuntimeDir(change), err)
+	for attempt := 1; ; attempt++ {
+		change := changeCandidate(date, slug, attempt)
+		nc := NewChange{Change: change, Slug: slug,
+			SpecDir:    filepath.ToSlash(filepath.Join(SpecsDir, change)),
+			ChangeDir:  filepath.ToSlash(filepath.Join(ChangesDir, change)),
+			RuntimeDir: layout.ChangeRuntimeDir(change)}
+		nc.SpecAbsDir = filepath.Join(root, filepath.FromSlash(nc.SpecDir))
+		nc.ChangeAbsDir = filepath.Join(root, filepath.FromSlash(nc.ChangeDir))
+		runtime := filepath.Join(root, filepath.FromSlash(nc.RuntimeDir))
+		dirs := []string{runtime, nc.SpecAbsDir, nc.ChangeAbsDir}
+		collision := false
+		for _, dir := range dirs {
+			if _, err := os.Lstat(dir); err == nil {
+				collision = true
+				break
+			} else if !os.IsNotExist(err) {
+				return NewChange{}, fmt.Errorf("scaffold: inspecting candidate %s: %w", dir, err)
+			}
+		}
+		if collision {
+			continue
+		}
+		// Mkdir reserves this ID. This is not a lock or cross-directory transaction.
+		if err := os.Mkdir(runtime, 0o755); err != nil {
+			if os.IsExist(err) {
+				continue
+			}
+			return NewChange{}, fmt.Errorf("scaffold: reserving %s: %w", nc.RuntimeDir, err)
+		}
+		created := []string{runtime}
+		retry := false
+		for _, dir := range dirs[1:] {
+			if err := os.Mkdir(dir, 0o755); err != nil {
+				// Remove only this attempt's new empty directories, never recursively.
+				for i := len(created) - 1; i >= 0; i-- {
+					_ = os.Remove(created[i])
+				}
+				if os.IsExist(err) {
+					retry = true
+					break
+				}
+				return NewChange{}, fmt.Errorf("scaffold: creating %s: %w", dir, err)
+			}
+			created = append(created, dir)
+		}
+		if retry {
+			continue
+		}
+		return nc, nil
 	}
-
-	specRelDir := filepath.Join(SpecsDir, change)
-	specAbsDir := filepath.Join(root, specRelDir)
-	if err := os.MkdirAll(specAbsDir, 0o755); err != nil {
-		return NewChange{}, fmt.Errorf("scaffold: creating %s: %w", specRelDir, err)
-	}
-
-	changeRelDir := filepath.Join(ChangesDir, change)
-	changeAbsDir := filepath.Join(root, changeRelDir)
-	if err := os.MkdirAll(changeAbsDir, 0o755); err != nil {
-		return NewChange{}, fmt.Errorf("scaffold: creating %s: %w", changeRelDir, err)
-	}
-
-	return NewChange{
-		Change:       change,
-		SpecDir:      filepath.ToSlash(specRelDir),
-		SpecAbsDir:   specAbsDir,
-		ChangeDir:    filepath.ToSlash(changeRelDir),
-		ChangeAbsDir: changeAbsDir,
-		RuntimeDir:   layout.ChangeRuntimeDir(change),
-		Slug:         slug,
-		Number:       number,
-	}, nil
 }

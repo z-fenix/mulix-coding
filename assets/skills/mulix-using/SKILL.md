@@ -1,12 +1,12 @@
 ---
-name: using-mulix
+name: mulix-using
 description: Use at the start of any session in a mulix-managed project, and whenever about to write or edit a file, to check which phase gates apply right now.
 ---
 
 # Using mulix
 
-mulix enforces a seven-phase workflow with two layers of enforcement, not
-just convention:
+mulix provides a seven-phase workflow with write-tool checks and
+transition evidence guards, backed by agent discipline:
 
 ```
 specify → clarify → design → tasks → build → verify → archive
@@ -22,16 +22,20 @@ specify → clarify → design → tasks → build → verify → archive
 | verify  | `mulix-verify`  | `verification-before-completion`                | `docs/changes/<change>/report.md` |
 | archive | `mulix-archive` | `finishing-a-development-branch`                | merged / PR / kept |
 
-1. On Claude Code, a **PreToolUse hook** blocks `Write`/`Edit` calls
-   that don't match the current phase's whitelist. If a write gets
-   blocked, the message says why and what to do next — read it, don't
-   retry the same call. Hosts without the hook (such as DeepSeek
-   Harness) have no automatic layer here: the whitelist still binds you.
+1. On Claude Code, a **PreToolUse hook** checks only `Write`/`Edit`
+   against the current phase's whitelist. Read a deny's reason and next
+   action; don't retry the same call or route around it. **Bash, MCP,
+   NotebookEdit, and other writers are not automatically gated.** Missing
+   `file_path` tool-input fields are allowed. Parsing, root discovery, active/state loading,
+   and response errors **fail open**; no active change also allows calls.
+   Hosts without this hook (such as DeepSeek Harness) rely on your
+   discipline for all writes. This is not a filesystem security sandbox.
 2. **Guard checks** (`mulix guard <event>`, run automatically inside
-   `mulix state transition <event>`) verify concrete evidence (an
-   artifact exists, the design approval is recorded, every task has a
-   ledger completion line and RED/GREEN evidence) before the phase
-   advances.
+   `mulix state transition <event>`) check recorded evidence (artifact
+   existence, approval flags, ledger completion and RED/GREEN reports).
+   They do **not** authenticate human consent or prove tests actually
+   executed. A transition must be legal from the current phase; `--force`
+   skips readiness guards only and cannot make an illegal event legal.
 
 ## Before doing anything else
 
@@ -70,7 +74,10 @@ hand-offs with phase gates:
 and runtime directory (`.mulix/.runtime/<change>/`) plus a fresh state in
 the specify phase, and makes it the active change. Do this before
 anything else for a new piece of work — don't start writing a spec by
-hand first.
+hand first. New IDs use the local date, e.g. `2026-10-14-add-login`,
+with `-2`, `-3` for same-day/title collisions. All three directories share
+that ID; filenames stay spec.md/tasks.md/report.md. Old `001-*` changes
+remain selectable with `mulix state select <change>`; don't rename them.
 
 ## Red flags — stop and reconsider
 

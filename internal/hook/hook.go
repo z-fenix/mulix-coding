@@ -1,7 +1,7 @@
-// Package hook implements the Claude Code PreToolUse hook that enforces
-// mulix's phase whitelist on every Write/Edit call. The block is enforced
-// by the host tool's exit code, not by the model choosing to comply, so an
-// agent cannot skip a phase's gate simply by not calling `mulix guard`.
+// Package hook implements Claude Code's PreToolUse phase whitelist for
+// Write/Edit calls. It does not gate Bash, MCP, NotebookEdit or other tools
+// that can write files. The CLI fails open on hook errors; this is workflow
+// control, not an unbypassable filesystem sandbox.
 package hook
 
 import (
@@ -50,18 +50,16 @@ type Decision struct {
 	Next string
 }
 
-// gatedTools are the only tool names mulix inspects. Anything else (Bash,
-// Read, Grep, ...) is allowed unconditionally: mulix gates writes, not
-// exploration or verification commands.
+// gatedTools are the only tool names mulix inspects. Other tools are
+// allowed unconditionally, including tools capable of filesystem writes.
 var gatedTools = map[string]bool{"Write": true, "Edit": true}
 
 // runtimeWritable lists, per phase, the subdirectories of the active
 // change's .mulix/.runtime/<change>/ that phase may write: the design
 // phase's brainstorming output (design doc, visual-companion screens) and
-// the build phase's execution workspace. state.yaml is in no list — state
-// moves only through guarded transitions, never a raw file edit, or the
-// whole mechanism can be bypassed by editing the scoreboard instead of
-// playing the game.
+// the build phase's execution workspace. state.yaml is in no list: agents
+// must use the state CLI rather than raw edits. This Write/Edit restriction
+// does not stop state edits through other tools or authenticate its content.
 var runtimeWritable = map[flow.Phase][]string{
 	flow.PhaseDesign: {layout.DesignDir, layout.BrainstormDir},
 	flow.PhaseBuild:  {layout.SddDir},

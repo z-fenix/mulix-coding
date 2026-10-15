@@ -2,8 +2,8 @@
 // .mulix/.runtime/<change>/state.yaml. Decoding is strict: unknown fields
 // fail to load rather than being silently dropped. The state file is the
 // single source of truth both the guard checks and the PreToolUse hook
-// read from — if it can't be trusted, the whole strong flow control
-// mechanism is void.
+// read from. These checks rely on recorded evidence, not authenticated
+// approval or proof of test execution; the hook fails open on load errors.
 package state
 
 import (
@@ -15,6 +15,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/z-fenix/mulix-coding/internal/fileutil"
 	"github.com/z-fenix/mulix-coding/internal/flow"
 	"github.com/z-fenix/mulix-coding/internal/layout"
 )
@@ -84,10 +85,22 @@ func Save(root string, s flow.State) error {
 	if err != nil {
 		return fmt.Errorf("state: marshaling: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := writeStateFile(path, data); err != nil {
 		return fmt.Errorf("state: writing %s: %w", path, err)
 	}
 	return nil
+}
+
+// writeStateFile preserves an existing file's permissions while preparing
+// the complete replacement; it does not provide concurrent-writer isolation.
+func writeStateFile(path string, data []byte) error {
+	mode := os.FileMode(0o644)
+	if info, err := os.Lstat(path); err == nil {
+		mode = info.Mode().Perm()
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return fileutil.WriteFile(path, data, mode)
 }
 
 // Exists reports whether a state file for change is already present under

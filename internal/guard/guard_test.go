@@ -42,6 +42,85 @@ func TestRun_SpecCompletePassesWhenArtifactPresent(t *testing.T) {
 	}
 }
 
+func TestRun_UsesDeclaredGuardRefs(t *testing.T) {
+	original := flow.Table
+	flow.Table = append([]flow.Transition(nil), original...)
+	t.Cleanup(func() { flow.Table = original })
+	for i := range flow.Table {
+		if flow.Table[i].Event == flow.EventSpecComplete {
+			flow.Table[i].GuardRefs = []string{"not-registered"}
+		}
+	}
+	report := Run(t.TempDir(), flow.New("001-x", ""), flow.EventSpecComplete)
+	if report.Passed() || len(report.Results) != 1 || report.Results[0].Name != "not-registered" {
+		t.Fatalf("unregistered declared guard must fail: %+v", report)
+	}
+}
+
+func TestRun_RejectsIllegalPhaseEvent(t *testing.T) {
+	for _, event := range []flow.Event{flow.EventBuildComplete, "unknown-event"} {
+		report := Run(t.TempDir(), flow.New("001-x", ""), event)
+		if report.Passed() || len(report.Results) != 1 || report.Results[0].Name != "legal-transition" {
+			t.Fatalf("illegal event %q must fail before readiness checks: %+v", event, report)
+		}
+	}
+}
+
+func TestRun_AllTransitionsUseDeclaredOrder(t *testing.T) {
+	for _, transition := range flow.Table {
+		t.Run(string(transition.Event), func(t *testing.T) {
+			s := flow.New("001-x", "")
+			s.Phase = transition.From
+			report := Run(t.TempDir(), s, transition.Event)
+			if len(report.Results) != len(transition.GuardRefs) {
+				t.Fatalf("got %d results for %v", len(report.Results), transition.GuardRefs)
+			}
+			seen := map[string]bool{}
+			for i, name := range transition.GuardRefs {
+				if seen[name] {
+					t.Fatalf("duplicate guard %q", name)
+				}
+				seen[name] = true
+				if report.Results[i].Name != name {
+					t.Fatalf("result %d = %q, want %q", i, report.Results[i].Name, name)
+				}
+			}
+		})
+	}
+}
+
+func TestRun_LegalTransitionWithNoGuardsPasses(t *testing.T) {
+	original := flow.Table
+	flow.Table = append([]flow.Transition(nil), original...)
+	t.Cleanup(func() { flow.Table = original })
+	for i := range flow.Table {
+		if flow.Table[i].Event == flow.EventSpecComplete {
+			flow.Table[i].GuardRefs = nil
+		}
+	}
+	report := Run(t.TempDir(), flow.New("001-x", ""), flow.EventSpecComplete)
+	if !report.Passed() || len(report.Results) != 0 {
+		t.Fatalf("explicit empty guard list should pass: %+v", report)
+	}
+}
+
+func TestGuardRegistry_CoversEveryDeclaredCheck(t *testing.T) {
+	used := map[string]bool{}
+	for _, transition := range flow.Table {
+		for _, name := range transition.GuardRefs {
+			if checksByName[name] == nil {
+				t.Fatalf("transition %q references unregistered guard %q", transition.Event, name)
+			}
+			used[name] = true
+		}
+	}
+	for name := range checksByName {
+		if !used[name] {
+			t.Fatalf("unreferenced guard %q", name)
+		}
+	}
+}
+
 const twoTasks = "# Tasks\n\n## Task 1: Parser\n\nsteps\n\n## Task 2: CLI\n\nsteps\n"
 
 // writeFile writes rel (slash-separated) under root.
@@ -90,10 +169,28 @@ func TestTaskNumbers_IgnoresFencedHeadings(t *testing.T) {
 	}
 }
 
+func TestStepCheckbox_TaskSectionsAndGuardsIgnoreStatusAndFencedExamples(t *testing.T) {
+	root := t.TempDir()
+	md := "## Task 1: A\n- [X] **Step 1: Completed**\n- [ ] **Step 2: Not executed**\n```markdown\n## Task 99: Example\n- [X] **Step 1: Example only**\n```\n## Task 2: B\n- [ ] **Step 1: Pending**\n"
+	numbers := TaskNumbers(md)
+	if len(numbers) != 2 || numbers[0] != 1 || numbers[1] != 2 {
+		t.Fatalf("numbers = %v", numbers)
+	}
+	change := "2026-10-14-checkbox"
+	writeFile(t, root, "docs/changes/"+change+"/tasks.md", md)
+	s := flow.New(change, "")
+	s.Phase = flow.PhaseTasks
+	s.TasksPath = "docs/changes/" + change + "/tasks.md"
+	if report := Run(root, s, flow.EventTasksComplete); !report.Passed() {
+		t.Fatalf("step status changed task-structure guards: %+v", report.Failures())
+	}
+}
+
 func TestRun_TasksCompleteRequiresTaskSections(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "docs/changes/001-x/tasks.md", "- [ ] T001 old checkbox style\n")
 	s := flow.New("001-x", "")
+	s.Phase = flow.PhaseTasks
 	s.TasksPath = "docs/changes/001-x/tasks.md"
 
 	report := Run(root, s, flow.EventTasksComplete)
@@ -106,6 +203,7 @@ func TestRun_TasksCompleteRejectsGappedNumbering(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "docs/changes/001-x/tasks.md", "## Task 1: A\n## Task 3: C\n")
 	s := flow.New("001-x", "")
+	s.Phase = flow.PhaseTasks
 	s.TasksPath = "docs/changes/001-x/tasks.md"
 
 	if Run(root, s, flow.EventTasksComplete).Passed() {
@@ -117,6 +215,7 @@ func TestRun_TasksCompletePassesWithNumberedSections(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "docs/changes/001-x/tasks.md", twoTasks)
 	s := flow.New("001-x", "")
+	s.Phase = flow.PhaseTasks
 	s.TasksPath = "docs/changes/001-x/tasks.md"
 
 	if report := Run(root, s, flow.EventTasksComplete); !report.Passed() {
@@ -184,6 +283,7 @@ func TestRun_TasksCompleteRejectsTasksOutsideChangeDir(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "docs/plans/tasks.md", twoTasks)
 	s := flow.New("001-x", "")
+	s.Phase = flow.PhaseTasks
 	s.TasksPath = "docs/plans/tasks.md"
 
 	if failureNamed(Run(root, s, flow.EventTasksComplete), "tasks-artifact-present") == nil {
@@ -205,6 +305,7 @@ func TestRun_BuildCompleteFailsWithoutWorkspace(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "docs/changes/001-x/tasks.md", twoTasks)
 	s := flow.New("001-x", "")
+	s.Phase = flow.PhaseBuild
 	s.TasksPath = "docs/changes/001-x/tasks.md"
 
 	report := Run(root, s, flow.EventBuildComplete)
@@ -306,6 +407,7 @@ func TestRun_VerifyPassRequiresRecordedPassResult(t *testing.T) {
 	}
 
 	s := flow.New("x", "")
+	s.Phase = flow.PhaseVerify
 	s.ReportPath = "docs/changes/001-x/report.md"
 	s.VerifyResult = flow.VerifyFail // report exists, but result says fail
 
@@ -318,6 +420,7 @@ func TestRun_VerifyPassRequiresRecordedPassResult(t *testing.T) {
 func TestRun_ArchiveRequiresExplicitConfirmation(t *testing.T) {
 	root := t.TempDir()
 	s := flow.New("x", "")
+	s.Phase = flow.PhaseArchive
 	s.ArchiveConfirmation = flow.ArchivePending
 
 	report := Run(root, s, flow.EventArchived)

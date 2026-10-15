@@ -15,7 +15,7 @@ func newNewCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "new <title>",
-		Short: "Create a new change: an artifact directory plus a fresh state in the specify phase",
+		Short: "Create a YYYY-MM-DD-slug change (same-day collisions get -2, -3) with fresh specify state",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := state.FindRoot(".")

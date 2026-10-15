@@ -2,3 +2,6 @@
 # a CRLF checkout breaks their bash scripts (shebang + here-strings).
 assets/superpowers/** text eol=lf
 assets/superpowers/**/*.png binary
+
+# Frozen install evidence is hashed as exact historical bytes, including CRLF.
+internal/scaffold/testdata/legacy/*.md -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

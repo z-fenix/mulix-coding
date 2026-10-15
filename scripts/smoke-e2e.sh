@@ -8,16 +8,17 @@ set -euo pipefail
 [ -n "${SMOKE_TRACE:-}" ] && set -x
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
 bin=${1:-}
 if [ -z "$bin" ]; then
-  bin="$(mktemp -d)/mulix"
+  bin="$work/mulix"
   (cd "$repo" && go build -o "$bin" ./cmd/mulix)
 fi
 mulix() { "$bin" "$@"; }
 
-work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
-cd "$work"
+mkdir "$work/project"
+cd "$work/project"
 git init -q && git config user.email smoke@example.com && git config user.name smoke
 git commit -q --allow-empty -m init
 
@@ -42,15 +43,21 @@ phase() { mulix state show | sed -n 's/^phase: *//p'; }
 step init
 mulix init >/dev/null
 test -f .claude/skills/brainstorming/SKILL.md
-test -f .claude/skills/using-mulix/SKILL.md
+test -f .claude/skills/mulix-using/SKILL.md
 test -x .claude/skills/subagent-driven-development/scripts/sdd-workspace || [ "${OS:-}" = "Windows_NT" ]
 test -f .mulix/.runtime/.gitignore
 
 step new
 mulix new "Add greeting" >/dev/null
-c=001-add-greeting
+IFS= read -r c < .mulix/active
+[[ "$c" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-add-greeting$ ]]
+for directory in "docs/specs/$c" "docs/changes/$c" ".mulix/.runtime/$c"; do test -d "$directory"; done
 test -f ".mulix/.runtime/$c/state.yaml"
-[ "$(cat .mulix/active)" = "$c" ]
+mulix new "Add greeting" >/dev/null
+IFS= read -r second < .mulix/active
+[ "$second" = "$c-2" ]
+for directory in "docs/specs/$second" "docs/changes/$second" ".mulix/.runtime/$second"; do test -d "$directory"; done
+mulix state select "$c" >/dev/null
 
 step specify
 expect_hook deny "src/main.go"
@@ -91,7 +98,7 @@ cat > "docs/changes/$c/tasks.md" <<'EOF'
 
 ## Task 1: Greeter
 
-**Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing test**
 
 ```markdown
 ## Task 9: an example heading inside a fence is not a task
@@ -99,7 +106,7 @@ cat > "docs/changes/$c/tasks.md" <<'EOF'
 
 ## Task 2: CLI
 
-**Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing test**
 EOF
 mulix state set tasks_path "docs/changes/$c/tasks.md" >/dev/null
 mulix state transition tasks-complete >/dev/null

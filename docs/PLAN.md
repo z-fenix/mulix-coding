@@ -464,3 +464,28 @@ docs/changes/<NNN-slug>/
 - [x] `go build ./...`、`go vet ./...`、`go test ./... -count=1` 全绿;`scripts/smoke-e2e.sh` 七阶段通过。
 - [x] 本机 `scripts/install.sh --source .` 重装 `~/.local/bin/mulix.exe`,临时目录 `mulix init` 确认带 7.0.0。
 - [x] `ledger/biz-finance`、`ledger/biz-finance-web` 各跑一次 `mulix update` → 两处 `VERSION` 均为 7.0.0;随后再跑一次,两个上游已删 prompt 模板被清掉,constitution 与 `.mulix/.runtime/.gitignore` 原样保留(biz-finance-web 的 `tasks-template.md` 有本地改动,按设计只报冲突不动它)。
+
+## Phase 16 — 安全资源更新、状态可靠性及当前入口(已完成)
+
+设计与Native实施计划经用户批准；在普通功能分支顺序执行，不创建worktree、不自动提交/推送。保持七阶段和mulix.state.v2，历史examples与内嵌superpowers不改。
+
+### 当前契约
+
+- GuardRefs驱动实际检查，删除第二套event→check来源；非法事件与未注册guard拒绝。transition --force只跳readiness，不改变合法迁移。
+- state/active与资源使用同目录临时文件→写入/Sync/Close→替换，不先截断旧目标。没有跨文件事务、多会话锁、并发隔离，也不承诺所有Windows文件系统原子Rename。
+- `.mulix/install-state.json`记录逐文件纯官方digest、hosts与pending。可信B/L/N三方更新保存L=M、B=N；无证据的旧内容不能因L=B就认作官方。缺失与I/O错误区分，坏metadata拒绝。
+- 危险覆盖/删除先保留L/B/原metadata到`.mulix/.backups/update-*/`；备份失败停止。冲突保留活动L/B，候选在`.mulix/.update-conflicts/`，人工解决放到目标后用重复`--accept`明确接受；force与accept互斥。冲突/blocked/错误非零，并显示部分完成与备份路径。
+- 当前入口为`mulix-using`。精确兼容`using-mulix`与`mulix-using-mulix`的SKILL.md；未知、多定制或目标碰撞保留，辅助文件不递归删。rename有accepted-cleanup checkpoint，恢复先验证目标/来源/基线/备份哈希。DSH引导仅在新入口ready后刷新，宿主无证据不默认安装Claude。
+- 新change三目录共用本地日期`YYYY-MM-DD-slug`，碰撞加-2/-3；spec.md/tasks.md/report.md文件名不变，旧001-*可select，不迁目录。
+- Step恢复`- [ ]`，只有实际执行验证完成才改`- [X]`。允许status-only edits，正文不改；未授权/未执行commit仍unchecked，台账和RED/GREEN证据独立保留。
+- README、入口/design/archive技能、CLI及注释明确：Claude hook仅Write/Edit，Bash/MCP/NotebookEdit未覆盖；缺tool-input路径/错误fail-open。DSH靠纪律+transition guards；guards不认证真实批准或测试执行。这是流程控制，不是安全沙箱。
+
+### 验证记录
+
+- [x] `bash scripts/smoke-e2e.sh`：真实七阶段、hook/guards、嵌入执行脚本、动态日期ID与同标题-2、git hygiene通过。
+- [x] `bash scripts/smoke-update.sh`：DSH-only连续三次更新不丢L且B纯N、两旧入口迁移重试及辅助文件保留、未知旧源非零、旁路冲突/accept、无Claude意外树通过。
+- [x] 技能paired检索/压力测试：入口发现、DSH rendered路径、只勾实际Steps1–4而非未执行Commit、hook边界/force语义检索通过；不是穷举Agent行为保证。
+- [x] 最终`go test ./... -count=1 -json`：8个测试包、338个test/subtest通过事件、0失败；vet/build、两smokes、diff --check及规范化换行后的gofmt通过。
+- [x] 一次fresh整工作区评审发现5个Important，均经独立RED→GREEN在本会话一次修复：Windows大小写identity/override排除、普通canonical pending不能被alias绕过、obsolete删除后metadata失败可force续作、同文件后续失败的partial路径/阶段报告、辅助ignore CRLF保留兼容。未进行第二轮review；无deferred minors。
+- Windows平台跳过`TestWriteFile_AppliesRequestedPermissions`与`TestInit_ScriptsAreExecutable`两个Unix权限位测试；没有宣称Unix原生验证。真实Windows sharing-violation测试已运行通过。
+- preset resolve仍读取embedded core而非磁盘core，独立延期；smoke确认未混入此修复。IDE MCP disconnected，未声称IDE build通过。原始CRLF-only文件不批量格式化，gofmt按规范化换行核验。

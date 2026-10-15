@@ -56,7 +56,13 @@ briefs, task reports with RED/GREEN evidence, test logs, review
 packages). `.mulix/.runtime/_shared/` catches output from the embedded
 skills when no change is active.
 
-Two independent mechanisms enforce phase gating from that state:
+New changes use a local-calendar-date ID, for example
+`2026-10-14-add-login`. The spec, change, and runtime directories share
+that ID; same-day/same-title collisions get `-2`, `-3`, etc. Existing
+`001-*` changes are not renamed and still work with `mulix state select`.
+The artifact filenames remain `spec.md`, `tasks.md`, and `report.md`.
+
+Two mechanisms provide workflow control from that state:
 
 1. **Guards** (`internal/guard`) check concrete evidence before a
    transition applies — an artifact exists and is non-empty, the design
@@ -64,11 +70,26 @@ Two independent mechanisms enforce phase gating from that state:
    sections numbered 1..n, the execution ledger has a `Task N: complete`
    line for every task, and every task's report carries RED and GREEN
    evidence.
-2. **The PreToolUse hook** (`mulix hook`) intercepts every `Write`/`Edit`
-   call Claude Code makes and blocks any file outside the current phase's
-   whitelist — including inside `.mulix/.runtime/`, where `state.yaml` is
-   never writable and each phase may write only the subdirectory it
-   produces (design: `specs/`, `brainstorm/`; build: `sdd/`).
+2. **The PreToolUse hook** (`mulix hook`) checks Claude Code's
+   `Write`/`Edit` calls against the phase whitelist, including runtime
+   subdirectories (design: `specs/`, `brainstorm/`; build: `sdd/`). Raw
+   `state.yaml` edits are denied through these tools, not through every
+   possible writer.
+
+### Enforcement boundary — not a security sandbox
+
+The hook matches **only `Write|Edit`**. Bash, MCP, NotebookEdit, and other
+filesystem-writing tools are not automatically intercepted. Missing tool-input
+`file_path` fields are allowed; request parsing, root discovery, active/state loading,
+and response-generation failures **fail open**. No active change also
+allows the call. DeepSeek Harness has no equivalent hook: agents follow
+phase discipline, while CLI transitions run guards.
+
+Guards check the **structure of recorded evidence**, not whether a human
+really approved something or a test actually ran. `flow.Table.GuardRefs`
+is the single source of readiness checks. `state transition --force`
+skips readiness only, never an illegal phase/event check. Neither hook nor
+guards authenticate a local writer or make the filesystem unbypassable.
 
 ## Embedded superpowers
 
@@ -106,13 +127,83 @@ hook entry into `.claude/settings.json` without disturbing any
 hooks/settings you already have. It does not create `docs/specs/` or
 `docs/changes/` — those come from `mulix new`, once there's an actual
 change to hold. `--dir` targets a project directory other than the
-current one; `--force` overwrites files mulix already installed.
+current one; `--force` backs up differing existing resources before
+replacing them. Existing customized files skipped by normal init are not
+silently registered as official vendor content. Init refuses unresolved
+pending updates, including with `--force`: resolve them through update
+first.
 
-Re-running `mulix init` is safe (it skips files that already exist);
-`mulix update` refreshes installed files after an upgrade, three-way
-merging local edits and removing files this version no longer ships if
-they're untouched. `mulix update --force` skips the merge and overwrites
-every managed file with the bundled version, discarding local edits.
+### Safe resource updates
+
+`mulix update` installs resources embedded in the **current binary**; it
+does not upgrade the CLI executable. `.mulix/install-state.json` records
+installed hosts, per-file official SHA-256 digests, and pending updates.
+For each managed file, B is the last accepted official content, L is the
+local file, and N is the current bundled content. A clean three-way merge
+stores **L = merged result, B = pure N**, so repeated updates keep local
+customizations instead of adopting them as a vendor baseline.
+
+Older installations are proved **per file**: a digest matching B, exact
+B=N bytes, or a frozen known official entry fingerprint. Unknown or
+corrupt baselines do not become trusted just because L=B. L=N can safely
+rebuild the baseline, after protecting a different old B. Digests are local
+consistency checks, not signatures or authentication against a malicious
+local writer. Corrupt installation metadata is an error even with force;
+repair it deliberately, not by treating it as an absent record.
+
+Conflicts leave L and B untouched. Candidates live in
+`.mulix/.update-conflicts/<content-id>/merged.md` and `incoming.md`, with a
+pending record; retries preserve them. To accept one:
+
+1. Read the reported candidate and incoming file, resolve manually, and
+   put the chosen result in the reported **managed target** (not just the
+   candidate). Remove this tool's conflict marker lines.
+2. Run `mulix update --accept .mulix/templates/spec-template.md` (substitute
+   the reported project-relative path; repeat `--accept` for more files).
+3. Acceptance keeps your resolved L and advances B to pure N. It requires
+   a pending update for the same incoming version; an unknown legacy file
+   without pending cannot be accepted this way. If the binary changed,
+   finish with the matching version or explicitly choose force.
+
+The canonical entry is **`mulix-using`**. Only exact old entry files
+`using-mulix/SKILL.md` and `mulix-using-mulix/SKILL.md` are migration
+sources. Known pristine sources or a single customization with a trusted
+ancestor can migrate. Unknown sources, competing customizations, and
+custom target collisions stay blocked; auxiliary files are never
+recursively deleted. A rename resolution must use frontmatter
+`name: mulix-using`. Accepted cleanup checkpoints allow interrupted
+cleanup to resume only while source/target/baseline/backup hashes agree.
+
+`mulix update --force` is an explicit discard decision: it backs up first,
+then installs current N and removes obsolete managed resources or exact
+old entry sources. It cannot be combined with `--accept`. Normal obsolete
+cleanup requires a trusted B and an untouched L. Templates/overrides,
+constitution, runtime data, backups, and conflict candidates are outside
+the updater's obsolete-file ownership.
+
+Destructive changes preserve old L, old B, and original metadata in a
+unique `.mulix/.backups/update-*/` directory (`local/`, `baseline/`,
+`install-state.json` if it existed). The first snapshot is not overwritten;
+backup failure stops replacement/deletion. Paths are printed even when a
+later operation fails. Backups and conflict files have local ignore rules;
+no-op updates create no backup. LF/CRLF versions of the required final ignore
+rules are accepted without rewriting existing bytes. Inspect these snapshots for manual recovery
+and retain them until satisfied; there is no automatic whole-run rollback.
+Conflicted/blocked updates and I/O failures return nonzero and report
+completed work rather than claim overall success. A `partial` outcome names
+mutations already completed within the failing file and the stage that failed;
+it is not a successful whole-file commit. If forced retirement of an obsolete
+pending file deleted L/B before metadata saving failed, repeat explicit force
+to finish retirement; normal retry stays blocked and candidates are retained.
+Windows case-only path aliases share managed/shipped identity, and excluded
+overrides remain excluded regardless of directory casing.
+
+State, active, and resource writes prepare a same-directory unique file,
+write/sync/close it, then replace the target without first truncating the
+old file. **No multi-session lock, concurrent-writer isolation, or
+cross-file transaction is provided**. In particular, Go does not guarantee
+atomic rename on non-Unix platforms: this is not an absolute all-Windows-
+filesystems atomicity promise.
 
 ### Agent hosts
 
@@ -131,7 +222,7 @@ mulix init --host claude,dsh   # both
 | `dsh` (DeepSeek Harness) | `.dsh/skills/` | guards only (no hook equivalent) | mulix section merged into `AGENTS.md` |
 
 Both hosts receive the same skill set: the `mulix-*` phase skills,
-the `using-mulix` bootstrap skill, and every embedded superpowers
+the `mulix-using` bootstrap skill, and every embedded superpowers
 skill. mulix's own skills are written per host — wherever they state
 the project skills directory they name the installing host's
 directory. The `.dsh/skills/` root is DeepSeek Harness's
@@ -142,9 +233,12 @@ this host nothing technical blocks an out-of-phase write — the guard
 checks inside `mulix state transition` are the enforcement.
 
 `mulix update` keeps every host tree the project installed (it derives
-them from the baseline copies under `.mulix/.installed/`), so a
-claude-only project never grows a `.dsh/skills/` tree, and a dsh
-project's `AGENTS.md` section is refreshed together with the skills.
+them from installation metadata and baseline skill footprints, falling
+back only to exact current/legacy entry footprints), so neither a
+claude-only nor a dsh-only project grows the other host's tree. Without
+host evidence it asks for `mulix init --host ...`, not default Claude.
+A dsh project's `AGENTS.md` section is refreshed only when its canonical
+entry is ready; blocked migration does not point it at a missing entry.
 To add a host to an existing project, re-run `mulix init --host dsh`
 (idempotent — it fills in only what's missing).
 
@@ -166,8 +260,9 @@ transition`, and `guard`; each defaults to the active change, which
 name in the change's state — mulix does not create the branch itself.
 
 `mulix state transition --force` applies a transition even when guard
-checks fail. That bypasses the strong flow control the rest of mulix is
-built around, so it's worth knowing it exists and worth not reaching for.
+checks fail, but only for an event legal from the current phase. It is a
+readiness recovery override, not permission to skip the phase table; do
+not use it to conceal missing approval or verification.
 
 Settable fields: `spec_path`, `tasks_path`, `report_path`,
 `clarify_skipped`, `design_track` (`bounded|architectural`),
@@ -185,7 +280,12 @@ spec-kit's (`FR-###`/`SC-###` numbering, User Scenarios, `##
 Clarifications`, principle placeholders). `tasks-template.md` is the
 layout writing-plans produces: plan header with Spec and Design links,
 Global Constraints, Review Focus, and one `## Task N: <name>` section
-per task with RED → GREEN → commit steps.
+per task with RED → GREEN → commit steps. Steps start as
+`- [ ] **Step N: ...**`; mark only steps actually executed and verified
+`- [X] **Step N: ...**` (capital X). This status-only edit to an approved
+plan is allowed, but task definitions, commands, and other approved text
+stay unchanged. An unperformed or unauthorized commit remains `[ ]` even
+when GREEN passes. Checkboxes do not replace ledger or RED/GREEN evidence.
 
 Guards depend on exactly two structural rules in those files: a literal
 `## Clarifications` heading in spec.md, and `## Task N` headings in
@@ -209,8 +309,12 @@ order, is:
 ```
 .mulix/templates/overrides/<name>.md   (project override, always wins)
 installed presets, by priority          (lower number = higher precedence)
-.mulix/templates/<name>.md              (core, bundled)
+embedded bundled template             (core used by preset resolve)
 ```
+
+Currently `preset resolve` uses embedded core content, not local edits to
+`.mulix/templates/<name>.md`. Aligning those core sources is deferred to a
+separate change; this update work does not fix that behavior.
 
 A preset is a directory with a `preset.yml` manifest plus the template
 files it declares (see `internal/preset/manifest.go` for the exact
@@ -252,8 +356,9 @@ works any time `tasks.md` exists and is not gated by `internal/flow`.
 go build ./...
 go vet ./...
 go test ./...
-./scripts/smoke-e2e.sh        # init + one change through all 7 phases in a
+bash scripts/smoke-e2e.sh    # init + one change through all 7 phases in a
                               # throwaway git repo (needs git + bash)
+bash scripts/smoke-update.sh # update/rename/conflict/accept (also needs Python 3)
 ./scripts/sync-superpowers.sh <superpowers-dir>   # re-vendor superpowers
 ```
 

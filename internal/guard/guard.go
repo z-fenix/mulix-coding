@@ -55,29 +55,45 @@ func (r Report) Failures() []Result {
 // checkFunc runs one guard check against project root + state.
 type checkFunc func(root string, s flow.State) Result
 
-// checksByEvent mirrors flow.Table: for each event that exits a phase, the
-// ordered list of checks that must all pass before flow.Apply may be
-// called with that event.
-var checksByEvent = map[flow.Event][]checkFunc{
-	flow.EventSpecComplete:    {checkArtifactPresent("spec-artifact-present", func(s flow.State) string { return s.SpecPath })},
-	flow.EventClarifyComplete: {checkClarifyRecorded},
-	flow.EventClarifySkipped:  {checkClarifySkipAcknowledged},
-	flow.EventDesignApproved:  {checkDesignApproved},
-	flow.EventTasksComplete:   {checkTasksInChangeDir, checkTasksHaveSections},
-	flow.EventBuildComplete:   {checkExecutionMethodChosen, checkPlanTasksComplete, checkTddEvidencePresent},
-	flow.EventVerifyPass:      {checkArtifactPresent("verification-report-present", func(s flow.State) string { return s.ReportPath }), checkVerifyResultPass},
-	flow.EventVerifyFail:      {checkVerifyResultFail},
-	flow.EventArchived:        {checkArchiveConfirmed},
+// checksByName supplies the implementations; flow.Table alone decides
+// which checks a transition needs and in what order.
+var checksByName = map[string]checkFunc{
+	"spec-artifact-present":       checkArtifactPresent("spec-artifact-present", func(s flow.State) string { return s.SpecPath }),
+	"clarify-recorded":            checkClarifyRecorded,
+	"clarify-skip-acknowledged":   checkClarifySkipAcknowledged,
+	"design-approved":             checkDesignApproved,
+	"tasks-artifact-present":      checkTasksInChangeDir,
+	"tasks-have-task-sections":    checkTasksHaveSections,
+	"execution-method-chosen":     checkExecutionMethodChosen,
+	"plan-tasks-complete":         checkPlanTasksComplete,
+	"tdd-evidence-present":        checkTddEvidencePresent,
+	"verification-report-present": checkArtifactPresent("verification-report-present", func(s flow.State) string { return s.ReportPath }),
+	"verify-result-pass":          checkVerifyResultPass,
+	"verification-failed":         checkVerifyResultFail,
+	"archive-confirmed":           checkArchiveConfirmed,
 }
 
-// Run executes every check registered for event against root/s and returns
-// the full report. An event with no registered checks passes trivially
-// (structural transitions with no readiness evidence to check, if any are
-// ever added).
+// Run executes the legal transition's declared checks. Illegal events and
+// unregistered references fail closed rather than silently omitting checks.
 func Run(root string, s flow.State, event flow.Event) Report {
-	checks := checksByEvent[event]
 	report := Report{Event: event}
-	for _, check := range checks {
+	transition, ok := flow.Find(s.Phase, event)
+	if !ok {
+		report.Results = append(report.Results, Result{
+			Name: "legal-transition",
+			Next: fmt.Sprintf("Event %q is not legal from phase %q.", event, s.Phase),
+		})
+		return report
+	}
+	for _, name := range transition.GuardRefs {
+		check, ok := checksByName[name]
+		if !ok {
+			report.Results = append(report.Results, Result{
+				Name: name,
+				Next: fmt.Sprintf("Guard %q is not registered; fix the guard registry before transitioning.", name),
+			})
+			continue
+		}
 		report.Results = append(report.Results, check(root, s))
 	}
 	return report

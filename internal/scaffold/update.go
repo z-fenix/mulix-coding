@@ -1,225 +1,412 @@
 package scaffold
 
 import (
-	"bytes"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+
+	"github.com/z-fenix/mulix-coding/internal/fileutil"
 )
 
-// UpdateResult classifies what update did to each file, so the CLI can
-// print an honest per-category summary.
+// UpdateResult reports completed per-file operations and preserved problems.
 type UpdateResult struct {
-	Written    []string // file was missing on disk; fresh copy installed
-	Updated    []string // untouched since install; replaced by the new version
-	Merged     []string // locally modified; three-way merge applied cleanly
-	Conflicted []string // locally modified; merge left Git-style conflict markers
-	Removed    []string // no longer shipped and untouched since install; deleted
-	Skipped    []string // left alone (already current, no baseline to merge against, or modified obsolete file)
+	Written    []string
+	Updated    []string
+	Merged     []string
+	Conflicted []string
+	Removed    []string
+	Skipped    []string
+	Accepted   []string
+	Migrated   []string
+	Blocked    []string
+	Backups    []string
+	// Partial lists completed mutations whose later per-file stage failed.
+	Partial []string
 }
 
-// UpdateOptions controls what update writes into a target project.
+func (r UpdateResult) NeedsAttention() bool {
+	return len(r.Conflicted) > 0 || len(r.Blocked) > 0 || len(r.Partial) > 0
+}
+
+// UpdateOptions controls resource updates, not updates to the CLI binary.
 type UpdateOptions struct {
-	// Root is the target project directory (must already exist).
 	Root string
-	// Force overwrites every managed file with the bundled version and
-	// rebaselines, discarding local edits — the escape hatch when a
-	// three-way merge isn't worth saving.
+	// Force discards managed local edits only after protective backups succeed.
 	Force bool
+	// Accept lists manually resolved pending files; paths are project-relative.
+	Accept []string
 }
 
-// Update refreshes every managed file (see managedFiles: mulix's skills
-// and the embedded superpowers skills under each installed host's skills
-// directory, and the templates) in a target project to the versions in
-// this mulix binary. Which hosts' trees are refreshed is derived from the
-// project itself (see updateHosts). Files the user hasn't touched are
-// updated in place; locally modified files are three-way merged against
-// the baseline copy recorded at install time (.mulix/.installed/), with
-// real conflicts left in the file as Git-style markers and reported.
-// Files without a baseline (installed by an older mulix) are skipped and
-// reported — guessing a merge base isn't safe. Files this mulix no longer
-// ships are removed if untouched.
-//
-// update does not touch .mulix/memory/constitution.md (a user-authored
-// document), .claude/settings.json (init's hook merge already handles
-// it), .mulix/presets/ (deliberate overrides, not core content), or
-// .mulix/.runtime/ (the changes' own records). It refreshes the mulix
-// section of AGENTS.md when the project has DSH skills installed.
-func Update(opts UpdateOptions) (UpdateResult, error) {
-	var res UpdateResult
+type updateRun struct {
+	opts      UpdateOptions
+	result    UpdateResult
+	state     *installState
+	backups   *updateBackups
+	write     func(string, []byte, fs.FileMode) error
+	remove    func(string) error
+	saveState func(*installState) error
+}
 
-	hosts := updateHosts(opts.Root)
+func newUpdateRun(opts UpdateOptions) (*updateRun, error) {
+	if opts.Force && len(opts.Accept) > 0 {
+		return nil, fmt.Errorf("scaffold: --force and --accept are mutually exclusive")
+	}
+	seen := map[string]bool{}
+	for _, rel := range opts.Accept {
+		if !validManagedRel(rel) || seen[managedPathIdentity(rel)] {
+			return nil, fmt.Errorf("scaffold: invalid or duplicate --accept path %q", rel)
+		}
+		seen[managedPathIdentity(rel)] = true
+	}
+	st, err := loadInstallState(opts.Root)
+	if err != nil {
+		return nil, err
+	}
+	for _, rel := range opts.Accept {
+		if _, ok := st.Pending[managedMapKey(st.Pending, rel)]; !ok {
+			return nil, fmt.Errorf("scaffold: %s has no pending update", rel)
+		}
+	}
+	return &updateRun{
+		opts: opts, state: st, backups: &updateBackups{root: opts.Root},
+		write: fileutil.WriteFile, remove: os.Remove,
+		saveState: func(st *installState) error { return saveInstallState(opts.Root, st) },
+	}, nil
+}
 
+// Update refreshes only installed hosts and managed resources. Baselines hold
+// pure vendor bytes; locally edited or unknown obsolete content is preserved.
+// It does not update the constitution, runtime, presets, or Claude settings.
+// Callers must inspect both the partial result and error/NeedsAttention.
+func Update(opts UpdateOptions) (result UpdateResult, err error) {
+	run, err := newUpdateRun(opts)
+	if err != nil {
+		return result, err
+	}
+	defer func() {
+		result = run.result
+		if run.backups.dir != "" {
+			result.Backups = []string{filepath.Join(opts.Root, filepath.FromSlash(run.backups.dir))}
+		}
+	}()
+	hosts, err := updateHosts(opts.Root, run.state)
+	if err != nil {
+		return result, err
+	}
+	run.state.Hosts = hosts
 	files, err := managedFiles(hosts)
 	if err != nil {
-		return res, err
+		return result, err
 	}
+	byRel := make(map[string]managedFile, len(files))
 	for _, f := range files {
-		if err := updateFile(&res, opts, f.Rel, string(f.Data)); err != nil {
-			return res, err
+		byRel[f.Rel] = f
+	}
+	for _, rel := range opts.Accept {
+		f, ok := byRel[managedMapKey(byRel, rel)]
+		if !ok {
+			return result, fmt.Errorf("scaffold: pending %s is not shipped by this binary", rel)
 		}
-		if f.Mode() != 0o644 {
-			// Keep scripts executable even after a merge rewrote them.
-			if err := os.Chmod(filepath.Join(opts.Root, filepath.FromSlash(f.Rel)), f.Mode()); err != nil {
-				return res, err
+		if err := run.validateAcceptance(rel, f); err != nil {
+			run.blockEntry(rel, err)
+			return result, err
+		}
+	}
+	accepted := map[string]bool{}
+	for _, rel := range opts.Accept {
+		if err := run.acceptPending(rel, byRel[managedMapKey(byRel, rel)]); err != nil {
+			return result, err
+		}
+		accepted[rel] = true
+	}
+	missingPending := map[string]bool{}
+	var pendingPaths []string
+	for rel := range run.state.Pending {
+		if _, shipped := byRel[managedMapKey(byRel, rel)]; !shipped {
+			pendingPaths = append(pendingPaths, rel)
+		}
+	}
+	sort.Strings(pendingPaths)
+	for _, rel := range pendingPaths {
+		_, hasBase, err := readInstalledFile(opts.Root, ".mulix/.installed/"+rel)
+		if err != nil {
+			return result, err
+		}
+		if hasBase || opts.Force {
+			if err := run.removeObsolete(rel); err != nil {
+				return result, err
+			}
+		} else {
+			run.result.Blocked = append(run.result.Blocked, rel+" (pending no longer shipped, baseline missing; retained)")
+		}
+		missingPending[managedMapKey(missingPending, rel)] = true
+	}
+	handledEntries := map[string]bool{}
+	readyEntries := map[Host]bool{}
+	for _, host := range hosts {
+		target := entryRel(host, entrySkillName)
+		incoming, ok := byRel[target]
+		if !ok {
+			return result, fmt.Errorf("scaffold: canonical entry bundle missing for %s", host)
+		}
+		handled, ready, err := run.migrateEntry(host, incoming)
+		if err != nil {
+			return result, err
+		}
+		readyEntries[host] = ready
+		if handled {
+			handledEntries[target] = true
+			for _, alias := range entryAliases {
+				handledEntries[entryRel(host, alias)] = true
 			}
 		}
 	}
-
-	// Files the last mulix shipped and this one no longer does: a
-	// superpowers file upstream deleted, a renamed mulix skill, a dropped
-	// template. The install baseline records every file an older mulix
-	// wrote, so this is derived rather than listed by hand.
 	shipped := make(map[string]bool, len(files))
 	for _, f := range files {
 		shipped[f.Rel] = true
-	}
-	for _, rel := range unshippedBaselineFiles(opts.Root, hosts, shipped) {
-		if err := removeObsolete(&res, opts, rel); err != nil {
-			return res, err
-		}
-	}
-
-	for _, h := range hosts {
-		if !h.writesBootstrap() {
+		if accepted[managedMapKey(accepted, f.Rel)] || handledEntries[f.Rel] {
 			continue
 		}
-		changed, err := mergeAgentsBootstrap(opts.Root, h.skillsDir())
+		if err := run.updateFile(f); err != nil {
+			return result, err
+		}
+	}
+	obsolete, err := unshippedBaselineFiles(opts.Root, hosts, shipped)
+	if err != nil {
+		return result, err
+	}
+	for _, rel := range obsolete {
+		if missingPending[managedMapKey(missingPending, rel)] || handledEntries[managedMapKey(handledEntries, rel)] {
+			continue
+		}
+		if err := run.removeObsolete(rel); err != nil {
+			return result, err
+		}
+	}
+	for _, host := range hosts {
+		if !host.writesBootstrap() {
+			continue
+		}
+		target := entryRel(host, entrySkillName)
+		if !handledEntries[target] {
+			ready, err := run.entryReady(target)
+			if err != nil {
+				return result, err
+			}
+			readyEntries[host] = ready
+		}
+		if !readyEntries[host] {
+			run.result.Skipped = append(run.result.Skipped, agentsBootstrapFile+" (entry not ready; bootstrap retained)")
+			continue
+		}
+		changed, err := mergeAgentsBootstrap(opts.Root, host.skillsDir())
 		if err != nil {
-			return res, err
+			return result, err
 		}
 		if changed {
-			res.Updated = append(res.Updated, agentsBootstrapFile+" (mulix section)")
+			run.result.Updated = append(run.result.Updated, agentsBootstrapFile+" (mulix section)")
 		} else {
-			res.Skipped = append(res.Skipped, agentsBootstrapFile+" (mulix section, already current)")
+			run.result.Skipped = append(run.result.Skipped, agentsBootstrapFile+" (mulix section, already current)")
 		}
 	}
-
-	return res, nil
-}
-
-// updateHosts decides which hosts' skill trees update refreshes. Claude
-// Code is always refreshed — it's the host every existing project
-// installed. DeepSeek Harness is refreshed only when this project
-// installed its tree, which the baseline copy under .mulix/.installed/
-// records; deriving it from disk keeps update stateless and never writes
-// .dsh/skills into a project that didn't ask for it.
-func updateHosts(root string) []Host {
-	hosts := []Host{HostClaude}
-	if dirHasFiles(filepath.Join(root, ".mulix", ".installed", filepath.FromSlash(HostDSH.skillsDir()))) {
-		hosts = append(hosts, HostDSH)
+	if err := run.saveState(run.state); err != nil {
+		return result, err
 	}
-	return hosts
+	return result, nil
 }
 
-// dirHasFiles reports whether dir exists and contains at least one
-// regular file (at any depth). A missing or unreadable tree counts as
-// having no files.
-func dirHasFiles(dir string) bool {
-	found := false
-	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			// The tree doesn't exist (or isn't readable): not installed.
-			return filepath.SkipAll
+// updateHosts is symmetric: there is no implicit Claude fallback. Historical
+// installations without metadata/baselines can identify only exact old entries.
+func updateHosts(root string, st *installState) ([]Host, error) {
+	hosts, err := installedHosts(root, st)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[Host]bool{}
+	for _, host := range hosts {
+		seen[host] = true
+	}
+	for _, host := range allHosts {
+		if seen[host] {
+			continue
 		}
-		if d.Type().IsRegular() {
-			found = true
-			return filepath.SkipAll
-		}
-		return nil
-	})
-	return found
-}
-
-// unshippedBaselineFiles walks the install baseline (.mulix/.installed/,
-// a mirror of the project root as mulix last left it) and returns every
-// file inside a tree mulix owns that the current bundle no longer ships.
-// Upstream deleting a superpowers file between versions, a renamed mulix
-// skill, and a dropped template all land here, so no list has to be
-// maintained. Paths are root-relative and slash-separated, in lexical
-// walk order.
-func unshippedBaselineFiles(root string, hosts []Host, shipped map[string]bool) []string {
-	base := filepath.Join(root, ".mulix", ".installed")
-	owned := mulixOwnedDirs(hosts)
-	ownedByMulix := func(rel string) bool {
-		for _, dir := range owned {
-			if strings.HasPrefix(rel, dir+"/") {
-				return true
+		for _, name := range append([]string{entrySkillName}, entryAliases...) {
+			_, exists, err := readInstalledFile(root, entryRel(host, name))
+			if err != nil {
+				return nil, err
+			}
+			if exists {
+				seen[host] = true
+				break
 			}
 		}
-		return false
 	}
+	hosts = nil
+	for _, host := range allHosts {
+		if seen[host] {
+			hosts = append(hosts, host)
+		}
+	}
+	if len(hosts) == 0 {
+		return nil, fmt.Errorf("scaffold: no installed agent host found; run mulix init --host claude or --host dsh")
+	}
+	return hosts, nil
+}
+
+// unshippedBaselineFiles derives obsolete paths from actual baseline ownership,
+// not arbitrary files in a skill directory. Errors are not missing baselines.
+func unshippedBaselineFiles(root string, hosts []Host, shipped map[string]bool) ([]string, error) {
+	baseProbe, err := projectFilePath(root, ".mulix/.installed/.probe")
+	if err != nil {
+		return nil, err
+	}
+	base := filepath.Dir(baseProbe)
+	owned := mulixOwnedDirs(hosts)
 	var out []string
-	_ = filepath.WalkDir(base, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			// A missing baseline (or an unreadable subtree) has nothing
-			// to report.
+	err = filepath.WalkDir(base, func(full string, d fs.DirEntry, err error) error {
+		if os.IsNotExist(err) {
 			return nil
+		}
+		if err != nil {
+			return err
 		}
 		if d.IsDir() {
 			return nil
 		}
-		rel, relErr := filepath.Rel(base, p)
-		if relErr != nil {
+		relative, err := filepath.Rel(base, full)
+		if err != nil {
+			return err
+		}
+		rel := filepath.ToSlash(relative)
+		if !validManagedRel(rel) || shipped[managedMapKey(shipped, rel)] {
 			return nil
 		}
-		if rel = filepath.ToSlash(rel); ownedByMulix(rel) && !shipped[rel] {
-			out = append(out, rel)
+		for _, dir := range owned {
+			if strings.HasPrefix(managedPathIdentity(rel), managedPathIdentity(dir)+"/") {
+				if !d.Type().IsRegular() {
+					return fmt.Errorf("scaffold: baseline %s is not a regular file", rel)
+				}
+				out = append(out, rel)
+				break
+			}
 		}
 		return nil
 	})
-	return out
+	if err != nil {
+		return nil, fmt.Errorf("scaffold: reading obsolete baselines: %w", err)
+	}
+	return out, nil
 }
 
-// mulixOwnedDirs are the trees mulix owns outright: the skills
-// directories it installs into each host, and its own .mulix content
-// directories. Anything inside them that the current bundle doesn't ship
-// is leftover from an older install. What mulix seeds once and then
-// leaves to the project — the constitution, .mulix/.runtime/.gitignore,
-// .mulix/presets/ — sits outside them, so a baseline entry there is never
-// a removal candidate.
 func mulixOwnedDirs(hosts []Host) []string {
 	dirs := []string{SuperpowersDir, ".mulix/templates"}
-	for _, h := range hosts {
-		dirs = append(dirs, h.skillsDir())
+	for _, host := range hosts {
+		dirs = append(dirs, host.skillsDir())
 	}
 	return dirs
 }
 
-// removeObsolete deletes a file an older mulix installed and this one no
-// longer ships — only when it (and its baseline) still match exactly, so
-// a user's edits are never thrown away. Anything else is reported.
-func removeObsolete(res *UpdateResult, opts UpdateOptions, relPath string) error {
-	full := filepath.Join(opts.Root, filepath.FromSlash(relPath))
-	baseFull := baselinePath(opts.Root, relPath)
-	cur, err := os.ReadFile(full)
-	if os.IsNotExist(err) {
-		_ = os.Remove(baseFull)
+func (r *updateRun) removeObsolete(rel string) (err error) {
+	var completed []string
+	stage := "obsolete local"
+	defer func() { r.recordPartial(rel, completed, stage, err) }()
+	if !validManagedRel(rel) {
+		return fmt.Errorf("scaffold: cannot remove unmanaged path %q", rel)
+	}
+	pending, hasPending := r.state.Pending[managedMapKey(r.state.Pending, rel)]
+	if hasPending && (!r.opts.Force || pending.Stage != "conflict" || len(pending.Sources) > 0) {
+		r.result.Blocked = append(r.result.Blocked, rel+" (obsolete with pending update; retained)")
 		return nil
-	} else if err != nil {
+	}
+	local, exists, err := readInstalledFile(r.opts.Root, rel)
+	if err != nil {
 		return err
 	}
-	base, err := os.ReadFile(baseFull)
-	if (err == nil && bytes.Equal(cur, base)) || opts.Force {
-		if err := os.Remove(full); err != nil {
-			return err
-		}
-		_ = os.Remove(baseFull)
-		removeEmptyParents(opts.Root, filepath.Dir(full))
-		removeEmptyParents(opts.Root, filepath.Dir(baseFull))
-		res.Removed = append(res.Removed, relPath)
+	base, hasBase, err := readInstalledFile(r.opts.Root, ".mulix/.installed/"+rel)
+	if err != nil {
+		return err
+	}
+	// A previous force may already have removed L/B before its metadata save
+	// failed. Only explicit force for a registered ordinary pending may finish
+	// that retirement without a baseline; normal retries remain blocked.
+	if !hasBase && !(r.opts.Force && hasPending) {
+		return fmt.Errorf("scaffold: obsolete baseline missing for %s", rel)
+	}
+	if !r.opts.Force && !r.state.trustedVendor(rel, base, nil) {
+		r.result.Blocked = append(r.result.Blocked, rel+" (obsolete, no trusted baseline; retained)")
 		return nil
 	}
-	res.Skipped = append(res.Skipped, relPath+" (no longer shipped, but locally modified; remove it by hand)")
+	if exists && !r.opts.Force && string(local) != string(base) {
+		r.result.Blocked = append(r.result.Blocked, rel+" (obsolete, locally modified; retained)")
+		return nil
+	}
+	if err := r.preserve(rel); err != nil {
+		return err
+	}
+	full := filepath.Join(r.opts.Root, filepath.FromSlash(rel))
+	baseFull := baselinePath(r.opts.Root, rel)
+	if exists {
+		if err := r.remove(full); err != nil {
+			return fmt.Errorf("scaffold: removing %s: %w", rel, err)
+		}
+		completed = append(completed, "local removed")
+	}
+	stage = "obsolete baseline"
+	if hasBase {
+		if err := r.remove(baseFull); err != nil {
+			return fmt.Errorf("scaffold: removing baseline for %s: %w", rel, err)
+		}
+		completed = append(completed, "vendor baseline removed")
+	}
+	stage = "obsolete metadata"
+	old, recorded := r.state.Files[managedMapKey(r.state.Files, rel)]
+	delete(r.state.Files, managedMapKey(r.state.Files, rel))
+	if hasPending {
+		delete(r.state.Pending, managedMapKey(r.state.Pending, rel))
+	}
+	if err := r.saveState(r.state); err != nil {
+		if hasPending {
+			r.state.Pending[managedMapKey(r.state.Pending, rel)] = pending
+		}
+		if recorded {
+			r.state.Files[managedMapKey(r.state.Files, rel)] = old
+		}
+		return fmt.Errorf("scaffold: saving obsolete removal for %s: %w", rel, err)
+	}
+	removed := rel
+	if !exists && !hasBase {
+		removed += " (pending retirement completed; files already absent)"
+	}
+	r.result.Removed = append(r.result.Removed, removed)
+	removeEmptyParents(r.opts.Root, filepath.Dir(full))
+	removeEmptyParents(r.opts.Root, filepath.Dir(baseFull))
 	return nil
 }
 
-// removeEmptyParents removes dir and its empty ancestors up to (not
-// including) root.
+func (r *updateRun) recordPartial(rel string, completed []string, stage string, err error) {
+	if err != nil && len(completed) > 0 {
+		r.result.Partial = append(r.result.Partial, fmt.Sprintf("%s (%s; failed: %s)", rel, strings.Join(completed, "; "), stage))
+	}
+}
+
+func (r *updateRun) preserve(rel string) error {
+	err := r.backups.preserve(rel)
+	if r.backups.dir != "" {
+		r.result.Backups = []string{filepath.Join(r.opts.Root, filepath.FromSlash(r.backups.dir))}
+	}
+	return err
+}
+
+// removeEmptyParents is best-effort empty-directory cleanup, never recursive.
 func removeEmptyParents(root, dir string) {
-	root = filepath.Clean(root)
-	for dir = filepath.Clean(dir); dir != root && strings.HasPrefix(dir, root); dir = filepath.Dir(dir) {
+	for dir = filepath.Clean(dir); dir != filepath.Clean(root); dir = filepath.Dir(dir) {
+		rel, err := filepath.Rel(root, dir)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return
+		}
 		entries, err := os.ReadDir(dir)
 		if err != nil || len(entries) > 0 {
 			return
@@ -230,111 +417,15 @@ func removeEmptyParents(root, dir string) {
 	}
 }
 
-// updateFile brings one managed file up to the incoming (bundled)
-// version, classifying the outcome into res. See Update for the
-// decision table.
-func updateFile(res *UpdateResult, opts UpdateOptions, relPath string, incoming string) error {
-	full := filepath.Join(opts.Root, filepath.FromSlash(relPath))
-	baseFull := baselinePath(opts.Root, relPath)
-
-	cur, err := os.ReadFile(full)
-	if os.IsNotExist(err) {
-		if writeErr := writeBoth(full, baseFull, []byte(incoming)); writeErr != nil {
-			return writeErr
-		}
-		res.Written = append(res.Written, relPath)
-		return nil
-	} else if err != nil {
-		return err
-	}
-
-	if opts.Force {
-		if writeErr := writeBoth(full, baseFull, []byte(incoming)); writeErr != nil {
-			return writeErr
-		}
-		res.Updated = append(res.Updated, relPath+" (forced)")
-		return nil
-	}
-
-	if bytes.Equal(cur, []byte(incoming)) {
-		// Already current; make sure the baseline matches so future
-		// merges see the right common ancestor.
-		base, baseErr := os.ReadFile(baseFull)
-		if baseErr != nil || !bytes.Equal(base, []byte(incoming)) {
-			if writeErr := writeFile(baseFull, []byte(incoming)); writeErr != nil {
-				return writeErr
-			}
-		}
-		res.Skipped = append(res.Skipped, relPath+" (already current)")
-		return nil
-	}
-
-	base, err := os.ReadFile(baseFull)
-	if os.IsNotExist(err) {
-		res.Skipped = append(res.Skipped, relPath+" (no baseline; merge manually or use --force)")
-		return nil
-	} else if err != nil {
-		return err
-	}
-
-	if bytes.Equal(cur, base) {
-		if writeErr := writeBoth(full, baseFull, []byte(incoming)); writeErr != nil {
-			return writeErr
-		}
-		res.Updated = append(res.Updated, relPath)
-		return nil
-	}
-
-	merged, conflicts := merge3(splitLines(base), splitLines([]byte(incoming)), splitLines(cur))
-	out := []byte(strings.Join(merged, "\n"))
-	if writeErr := writeBoth(full, baseFull, out); writeErr != nil {
-		return writeErr
-	}
-	if conflicts > 0 {
-		res.Conflicted = append(res.Conflicted, relPath)
-	} else {
-		res.Merged = append(res.Merged, relPath)
-	}
-	return nil
+// baselinePath mirrors a project-relative path to its pure vendor ancestor.
+func baselinePath(root, rel string) string {
+	return filepath.Join(root, ".mulix", ".installed", filepath.FromSlash(rel))
 }
 
-// baselinePath mirrors relPath under .mulix/.installed/ to hold the
-// bytes mulix wrote at install/update time — the common ancestor for
-// later three-way merges.
-func baselinePath(root, relPath string) string {
-	return filepath.Join(root, ".mulix", ".installed", filepath.FromSlash(relPath))
+func writeFile(full string, data []byte) error { return writeFileMode(full, data, 0o644) }
+func writeFileMode(full string, data []byte, mode fs.FileMode) error {
+	return fileutil.WriteFile(full, data, mode)
 }
 
-// writeBoth writes the file and its baseline copy in one step.
-func writeBoth(full, baseFull string, data []byte) error {
-	if err := writeFile(full, data); err != nil {
-		return err
-	}
-	return writeFile(baseFull, data)
-}
-
-// writeFile writes data to path, creating parent directories as needed.
-func writeFile(path string, data []byte) error {
-	return writeFileMode(path, data, 0o644)
-}
-
-// writeFileMode is writeFile with explicit permission bits. os.WriteFile
-// only applies the mode when creating the file, so an existing file is
-// chmod-ed too.
-func writeFileMode(path string, data []byte, mode fs.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(path, data, mode); err != nil {
-		return err
-	}
-	return os.Chmod(path, mode)
-}
-
-// splitLines splits file content into merge3's line representation.
-// Splitting on "\n" without trimming keeps the trailing-newline state
-// intact through a merge round-trip: a file ending in "\n" yields a
-// final empty element that Join restores.
-func splitLines(data []byte) []string {
-	return strings.Split(string(data), "\n")
-}
+// Preserve the trailing-newline state through merge3's line representation.
+func splitLines(data []byte) []string { return strings.Split(string(data), "\n") }

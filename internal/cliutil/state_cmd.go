@@ -113,7 +113,7 @@ func newStateTransitionCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&change, "change", "", "change id (defaults to the active change)")
-	cmd.Flags().BoolVar(&force, "force", false, "apply the transition even if guard checks fail (bypasses strong flow control; use only when you know why)")
+	cmd.Flags().BoolVar(&force, "force", false, "skip readiness guards for a legal transition (does not allow illegal phase events; recovery only)")
 	return cmd
 }
 
