@@ -40,6 +40,10 @@ const (
 	// phase's plan executor. tasks.md is the plan, so its workspace is
 	// SddDir/tasks/ (disambiguated by a plan-path marker on collision).
 	SddDir = "sdd"
+	// VerificationDir holds verification tooling and per-run evidence.
+	VerificationDir = "verification"
+	// MigrationsDir holds runtime artifact relocation records.
+	MigrationsDir = "migrations"
 )
 
 // ChangeRuntimeDir returns the slash-separated, root-relative runtime

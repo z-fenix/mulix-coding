@@ -57,12 +57,15 @@ var gatedTools = map[string]bool{"Write": true, "Edit": true}
 // runtimeWritable lists, per phase, the subdirectories of the active
 // change's .mulix/.runtime/<change>/ that phase may write: the design
 // phase's brainstorming output (design doc, visual-companion screens) and
-// the build phase's execution workspace. state.yaml is in no list: agents
-// must use the state CLI rather than raw edits. This Write/Edit restriction
-// does not stop state edits through other tools or authenticate its content.
+// the build phase's execution workspace. Build and verify also produce
+// verification evidence and runtime migration records. state.yaml is in
+// no list: agents must use the state CLI rather than raw edits. This
+// Write/Edit restriction does not stop state edits through other tools
+// or authenticate its content.
 var runtimeWritable = map[flow.Phase][]string{
 	flow.PhaseDesign: {layout.DesignDir, layout.BrainstormDir},
-	flow.PhaseBuild:  {layout.SddDir},
+	flow.PhaseBuild:  {layout.SddDir, layout.VerificationDir, layout.MigrationsDir},
+	flow.PhaseVerify: {layout.VerificationDir, layout.MigrationsDir},
 }
 
 // Decide applies the phase whitelist to req against root/s. root is the
@@ -144,7 +147,7 @@ func decideRuntime(s flow.State, rel string) Decision {
 	return Decision{
 		Allow:  false,
 		Reason: reason,
-		Next:   "Runtime artifacts belong to the phase that produces them: design docs and brainstorm screens to design, execution workspaces to build.",
+		Next:   "Runtime artifacts belong to the phase that produces them: design docs and brainstorm screens to design, execution workspaces to build, verification evidence and migration records to build or verify.",
 	}
 }
 

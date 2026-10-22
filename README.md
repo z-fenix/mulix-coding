@@ -53,7 +53,12 @@ everything produced while the change runs — its state (`state.yaml`),
 the approved design doc, visual-companion sessions (git-ignored: they
 carry a session key), and the build's execution workspace (ledger, task
 briefs, task reports with RED/GREEN evidence, test logs, review
-packages). `.mulix/.runtime/_shared/` catches output from the embedded
+packages). Build and verify may also write `verification/` (tooling and
+per-run evidence) and `migrations/` (runtime relocation manifests) under
+the active change's runtime directory. These permissions do not allow
+writes to another change, the CLI-owned `state.yaml`, or an archived
+change. The final report stays under `docs/changes/<change>/report.md`.
+`.mulix/.runtime/_shared/` catches output from the embedded
 skills when no change is active.
 
 New changes use a local-calendar-date ID, for example

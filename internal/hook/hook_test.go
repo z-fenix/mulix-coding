@@ -129,7 +129,7 @@ func TestDecide_DesignPhaseWritesOnlyRuntimeDesignDirs(t *testing.T) {
 	}
 }
 
-func TestDecide_BuildPhaseAllowsSddWorkspaceOnly(t *testing.T) {
+func TestDecide_BuildPhaseAllowsSddWorkspaceAndFreezesDesign(t *testing.T) {
 	s := flow.New("add-login", "")
 	s.Phase = flow.PhaseBuild
 
@@ -151,6 +151,34 @@ func TestDecide_OtherChangesRuntimeDirBlocked(t *testing.T) {
 	// segment-aware: add-login-2 is not add-login
 	if d := Decide("/repo", s, req("Write", ".mulix/.runtime/add-login-2/sdd/x.md")); d.Allow {
 		t.Fatal("expected a prefix-sharing change id not to match")
+	}
+}
+
+func TestDecide_RuntimeEvidenceDirectories(t *testing.T) {
+	for _, phase := range flow.Phases {
+		for _, tool := range []string{"Write", "Edit"} {
+			for _, dir := range []string{"verification", "migrations"} {
+				t.Run(string(phase)+"/"+tool+"/"+dir, func(t *testing.T) {
+					s := flow.New("add-login", "")
+					s.Phase = phase
+					want := phase == flow.PhaseBuild || phase == flow.PhaseVerify
+					p := ".mulix/.runtime/add-login/" + dir + "/run-1/manifest.json"
+					if d := Decide("/repo", s, req(tool, p)); d.Allow != want {
+						t.Fatalf("%s in %s: want allow=%t, got %+v", p, phase, want, d)
+					}
+					for _, blocked := range []string{
+						".mulix/.runtime/other/" + dir + "/manifest.json",
+						".mulix/.runtime/add-login-2/" + dir + "/manifest.json",
+						".mulix/.runtime/add-login/" + dir + "-other/manifest.json",
+						".mulix/.runtime/add-login/" + dir + "/../state.yaml",
+					} {
+						if d := Decide("/repo", s, req(tool, blocked)); d.Allow {
+							t.Errorf("expected %s to remain blocked in %s", blocked, phase)
+						}
+					}
+				})
+			}
+		}
 	}
 }
 
