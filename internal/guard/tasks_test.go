@@ -29,6 +29,48 @@ func TestCompletedTasks_LedgerFormats(t *testing.T) {
 	}
 }
 
+func TestRun_BuildCompletePassesWithSectionedLedger(t *testing.T) {
+	root := t.TempDir()
+	s, ws := buildFixture(t, root, twoTasks)
+	writeFile(t, root, ws+"/progress.md", `# SDD progress — plan: docs/changes/001-x/tasks.md
+
+## Execution context
+
+- Execution: inline; no commit or push authorized.
+
+## Pre-flight
+
+| Tasks | Interface | Finding |
+|---|---|---|
+| 1 → 2 | parser result | signatures match |
+
+## Task progress
+
+### Task 1
+
+- Task 1: complete
+  - Commits: uncommitted
+  - Tests: `+"`go test ./...`"+`
+  - Result: PASS
+  - Evidence: [report](task-1-report.md)
+
+### Task 2
+
+- Task 2: Ruling: retained the approved interface.
+- Task 2: complete
+  - Evidence: [report](task-2-report.md)
+
+## Final review
+
+- Final: review clean; runtime validation remains a separate gate.
+`)
+	writeFile(t, root, ws+"/task-1-report.md", goodReport)
+	writeFile(t, root, ws+"/task-2-report.md", goodReport)
+	if report := Run(root, s, flow.EventBuildComplete); !report.Passed() {
+		t.Fatalf("expected sectioned ledger to pass, failures: %+v", report.Failures())
+	}
+}
+
 func TestRun_BuildCompletePassesWithMarkdownLedger(t *testing.T) {
 	root := t.TempDir()
 	s, ws := buildFixture(t, root, twoTasks)

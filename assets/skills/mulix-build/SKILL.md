@@ -50,6 +50,13 @@ these mulix specifics:
   `.mulix/active`). The ledger (`progress.md`), task briefs, reports, test
   logs, and review packages all live there. Run the scripts from the
   project root.
+- **Ledger layout.** Both executors initialize `progress.md` with the
+  shared `subagent-driven-development/scripts/progress-init` helper and
+  follow `subagent-driven-development/progress-format.md`: execution
+  context, pre-flight, task progress (`### Task N`), then final review.
+  Keep `- Task N: complete` on its own line, with command/result/evidence
+  as child items. Existing plain-line ledgers remain valid and unchanged;
+  append new sections rather than reformatting history.
 - **Worktree.** `using-git-worktrees` asks before creating one. If you
   do work in a new worktree, run mulix commands from it and keep
   `.mulix/` there — the hook and guards read state relative to the

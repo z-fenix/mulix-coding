@@ -145,12 +145,11 @@ a ledger file, not only in todos.
   round. A ledger whose first line names a different plan file — or a stray
   ledger at the old flat path `.mulix/.runtime/<change>/sdd/progress.md` — is another
   plan's progress: leave it in place and start your own, fresh.
-- Create the ledger with its identity as the first line:
-  `# SDD ledger — plan: <plan file path>`, followed by a blank line.
-  Write each event as a Markdown list item: `- Task <N>: ...`,
-  `- Ruling: ...`, or `- Final: ...`; pre-flight tables stay tables.
-  On resume, both list items and legacy plain completion lines count.
-  Keep existing ledger history unchanged.
+- Initialize the ledger with `bash ../subagent-driven-development/scripts/progress-init PLAN_FILE`
+  (path relative to this skill directory), then follow
+  [the shared ledger format](../subagent-driven-development/progress-format.md).
+  It preserves the first-line identity and all existing history. On resume,
+  both Markdown list items and legacy plain completion lines count.
 - The ledger is your recovery map: the commits it names exist in git even
   when your context no longer remembers creating them. After compaction,
   trust the ledger and `git log` over your own recollection.

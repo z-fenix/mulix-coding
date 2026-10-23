@@ -249,8 +249,10 @@ func checkPlanTasksComplete(root string, s flow.State) Result {
 		return Result{Name: name, Pass: false, Next: fmt.Sprintf("No ledger at %s. The build phase's executor writes one line per completed task there.", slashRel(root, filepath.Join(ws, "progress.md")))}
 	}
 	first, _, _ := strings.Cut(string(ledger), "\n")
-	if !strings.HasPrefix(strings.TrimSpace(first), "# SDD ledger") || !strings.HasSuffix(strings.TrimSpace(first), path.Base(filepath.ToSlash(s.TasksPath))) {
-		return Result{Name: name, Pass: false, Next: fmt.Sprintf("Ledger %s does not start with \"# SDD ledger — plan: %s\".", slashRel(root, filepath.Join(ws, "progress.md")), s.TasksPath)}
+	identity := strings.TrimSpace(first)
+	knownFormat := strings.HasPrefix(identity, "# SDD progress") || strings.HasPrefix(identity, "# SDD ledger")
+	if !knownFormat || !strings.HasSuffix(identity, path.Base(filepath.ToSlash(s.TasksPath))) {
+		return Result{Name: name, Pass: false, Next: fmt.Sprintf("Progress %s does not start with \"# SDD progress — plan: %s\" (legacy \"# SDD ledger\" is also accepted).", slashRel(root, filepath.Join(ws, "progress.md")), s.TasksPath)}
 	}
 	done := CompletedTasks(string(ledger))
 	var missing []int

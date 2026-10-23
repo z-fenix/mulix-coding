@@ -157,7 +157,12 @@ cat > "$work/brief-expected.md" <<'EOF'
 EOF
 cmp "$work/brief-expected.md" "$ws/task-1-brief.md"
 [ "$(sed -n '2p' "$ws/progress.md")" = "" ]
-grep -q '^- Task 1: complete ' "$ws/progress.md"
+grep -q '^## Execution context$' "$ws/progress.md"
+grep -q '^## Pre-flight$' "$ws/progress.md"
+grep -q '^## Task progress$' "$ws/progress.md"
+grep -q '^### Task 1$' "$ws/progress.md"
+grep -q '^- Task 1: complete$' "$ws/progress.md"
+grep -q '^  - Evidence: \[test log\](task-1-tests.log)$' "$ws/progress.md"
 # Successful tests cannot record a task whose brief cannot be extracted.
 cp "$ws/progress.md" "$work/ledger-before.md"
 expect_fail bash "$done_script" "docs/changes/$c/tasks.md" 99 "$base" -- true

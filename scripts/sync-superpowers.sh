@@ -118,6 +118,13 @@ patch "$sp/writing-plans/SKILL.md" 's{\*\*Save plans to:\*\* `docs/changes/<chan
 patch "$sp/executing-plans/SKILL.md" 's/- Check for this plan\x27s ledger at `<workspace>\/progress\.md`\. If its first\n  line names your plan file, tasks with a `Task <N>: complete` line are\n  DONE — do not redo them; resume at the first task without one\. Their\n/- Check for this plan\x27s ledger at `<workspace>\/progress.md`. If its first\n  line names your plan file, tasks with a `- Task <N>: complete` line are\n  DONE — do not redo them; resume at the first task without one. Their\n/'
 patch "$sp/subagent-driven-development/SKILL.md" 's/- Check for this plan\x27s ledger at `<workspace>\/progress\.md`\. If its first\n  line names your plan file, tasks with a `Task <N>: complete` line are DONE\n  — do not re-dispatch them; resume at the first task without one\. A task\n/- Check for this plan\x27s ledger at `<workspace>\/progress.md`. If its first\n  line names your plan file, tasks with a `- Task <N>: complete` line are DONE\n  — do not re-dispatch them; resume at the first task without one. A task\n/'
 
+# Runtime ledger tools and templates are mulix-owned. Apply their canonical
+# overlay after upstream rewrites so future syncs keep the sectioned format.
+for skill in executing-plans subagent-driven-development; do
+  patch "$sp/$skill/SKILL.md" 's{- Create the ledger with its identity as the first line:\n  `# SDD ledger — plan: <plan file path>`\.}{- Initialize the ledger with `bash ../subagent-driven-development/scripts/progress-init PLAN_FILE`\n  (path relative to this skill directory), then follow\n  [the shared ledger format](../subagent-driven-development/progress-format.md).\n  It preserves the first-line identity and all existing history. On resume,\n  both Markdown list items and legacy plain completion lines count.}g'
+done
+cp -R "$repo/scripts/superpowers-overrides/." "$sp/"
+
 # Nothing may still point at the upstream locations.
 if grep -rnE '\.superpowers/|docs/superpowers/|superpowers:[a-z]' "$sp"; then
   echo "sync-superpowers: upstream paths/references survived the rewrite (see above)" >&2

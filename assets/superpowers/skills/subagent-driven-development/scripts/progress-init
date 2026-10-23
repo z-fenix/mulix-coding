@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Create a sectioned ledger for one plan, or leave its existing history intact.
+# Usage: progress-init PLAN_FILE
+set -euo pipefail
+
+if [ $# -ne 1 ]; then
+  echo "usage: progress-init PLAN_FILE" >&2
+  exit 2
+fi
+
+plan=$1
+scripts=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+dir=$("${BASH:-bash}" "$scripts/sdd-workspace" "$plan")
+ledger="$dir/progress.md"
+
+if [ ! -e "$ledger" ]; then
+  # The identity line stays machine-readable; the remaining template is literal.
+  {
+    printf '# SDD progress — plan: %s\n' "$plan"
+    tail -n +2 "$scripts/../progress-template.md"
+  } > "$ledger"
+fi
+printf '%s\n' "$ledger"

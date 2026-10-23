@@ -117,6 +117,15 @@ design gate, writing-plans writes `docs/changes/<change>/tasks.md` with
 `## Task N` headings and no execution handoff, the executors keep their
 workspace as the change's record. Each patch must match exactly once, so
 upstream drift fails the sync instead of shipping a half-rewritten copy.
+The mulix-owned runtime ledger tools and templates are maintained in
+`scripts/superpowers-overrides/` and copied into the embedded skills by
+that sync; edit the overlay and refresh its matching files under
+`assets/superpowers/skills/` together. New progress files use
+`# SDD progress — plan: ...` as their first line, followed by execution
+context, pre-flight, per-task progress, and final-review sections, with
+separate completion markers and linked evidence. Existing files stay
+unchanged: legacy `# SDD ledger` identities and plain completion lines
+remain valid.
 
 ## Install into a project
 

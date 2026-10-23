@@ -1,13 +1,7 @@
 #!/usr/bin/env bash
-# Close one task of an inline plan execution in a single call: run the task's
-# test command, keep its full output in the workspace, print the tail, and —
-# only if the command and brief refresh succeeded — append the completion
-# list item to the ledger. Step status comes from the approved plan.
-# A failing command records nothing: the task is not complete.
-#
+# Close one inline task: run tests, refresh its brief, then append a sectioned
+# completion record. Failed tests or brief refresh never record completion.
 # Usage: task-done PLAN_FILE TASK_NUMBER BASE -- TEST_COMMAND [ARGS...]
-#   BASE is the SHA task-start printed; the completion line records BASE..HEAD.
-# Exit: the test command exit status, or nonzero if brief refresh fails.
 set -euo pipefail
 
 if [ $# -lt 5 ] || [ "$4" != "--" ]; then
@@ -23,19 +17,12 @@ sdd="$(cd "$(dirname "$0")/../../subagent-driven-development/scripts" && pwd)"
 
 git rev-parse --verify --quiet "$base" >/dev/null || { echo "bad BASE: $base" >&2; exit 2; }
 
-dir=$("$sdd/sdd-workspace" "$plan")
+dir=$("${BASH:-bash}" "$sdd/sdd-workspace" "$plan")
 log="$dir/task-${n}-tests.log"
-ledger="$dir/progress.md"
 
-# Render the command the way a person would type it, for the ledger line.
-cmd=""
-for a in "$@"; do
-  case "$a" in
-    *[[:space:]\"\;\|\&]*) cmd="$cmd '$a'" ;;
-    *) cmd="$cmd $a" ;;
-  esac
-done
-cmd=${cmd# }
+# Shell quoting keeps arguments (including newlines) on one readable line.
+printf -v cmd '%q ' "$@"
+cmd=${cmd% }
 
 rc=0
 "$@" > "$log" 2>&1 || rc=$?
@@ -49,7 +36,32 @@ fi
 last=$(grep -v '^[[:space:]]*$' "$log" | tail -n 1) || last="(no output)"
 # Refresh only this task from the approved plan before recording completion.
 "${BASH:-bash}" "$sdd/task-brief" "$plan" "$n" >/dev/null
-[ -f "$ledger" ] || printf '# SDD ledger — plan: %s\n\n' "$plan" > "$ledger"
-line="- Task $n: complete (commits $(git rev-parse --short=7 "$base")..$(git rev-parse --short=7 HEAD), tests: $cmd → $last)"
-printf '%s\n' "$line" >> "$ledger"
+ledger=$("${BASH:-bash}" "$sdd/progress-init" "$plan")
+
+# A longer delimiter keeps literal backticks in commands and results intact.
+code_span() {
+  local text=$1 fence='`'
+  while [[ "$text" == *"$fence"* ]]; do fence="$fence"'`'; done
+  printf '%s %s %s' "$fence" "$text" "$fence"
+}
+
+last_heading=$(grep -E '^#{2,3} ' "$ledger" | tail -n 1 | tr -d '\r') || last_heading=""
+last_phase=$(grep '^## ' "$ledger" | tail -n 1 | tr -d '\r') || last_phase=""
+line="- Task $n: complete"
+{
+  # Separate appended content even when a legacy ledger has no final LF.
+  printf '\n\n'
+  if [ "$last_phase" = "## Final review" ]; then
+    printf '## Task progress (continued)\n\n'
+    last_heading=""
+  fi
+  if [ "$last_heading" != "### Task $n" ]; then
+    printf '### Task %s\n\n' "$n"
+  fi
+  printf '%s\n' "$line"
+  printf '  - Commits: '; code_span "$(git rev-parse --short=7 "$base")..$(git rev-parse --short=7 HEAD)"; printf '\n'
+  printf '  - Tests: '; code_span "$cmd"; printf '\n'
+  printf '  - Result: '; code_span "$last"; printf '\n'
+  printf '  - Evidence: [test log](task-%s-tests.log)\n' "$n"
+} >> "$ledger"
 echo "ledger: $line"

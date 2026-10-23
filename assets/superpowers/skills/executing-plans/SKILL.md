@@ -135,12 +135,11 @@ and the new one resumes from the same ledger.
   them: after compaction, trust the ledger and `git log` over your own
   recollection. A ledger whose first line names a different plan file is
   another plan's progress: leave it and start your own, fresh.
-- Create the ledger with its identity as the first line:
-  `# SDD ledger — plan: <plan file path>`, followed by a blank line.
-  Write each event as a Markdown list item: `- Task <N>: ...`,
-  `- Ruling: ...`, or `- Final: ...`; pre-flight tables stay tables.
-  On resume, both list items and legacy plain completion lines count.
-  Keep existing ledger history unchanged.
+- Initialize the ledger with `bash ../subagent-driven-development/scripts/progress-init PLAN_FILE`
+  (path relative to this skill directory), then follow
+  [the shared ledger format](../subagent-driven-development/progress-format.md).
+  It preserves the first-line identity and all existing history. On resume,
+  both Markdown list items and legacy plain completion lines count.
 - `git clean -fdx` will destroy the workspace (it's git-ignored scratch);
   if that happens, recover from `git log`.
 
