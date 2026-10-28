@@ -1,7 +1,7 @@
 # 写入门禁多会话绑定设计
 
 日期：2026-10-28
-状态：设计与实施计划已获批准；Native 实现已完成一次独立整分支审阅并修复发现。本机验证通过；真实 CLI 仅 SessionStart 有证据；Unix 原生运行未验证；已提交到 `feat/session-bound-write-gate`（`bd64722`）。
+状态：设计与实施计划已获批准；Native 实现已完成一次独立整分支审阅并修复发现。本机验证通过；真实 CLI 已证实 SessionStart 与 PreToolUse；自动环境注入未验证，Unix 原生运行未验证；已合并到 `main`（`00376be`）。
 
 ## 1. 意图与确认范围
 

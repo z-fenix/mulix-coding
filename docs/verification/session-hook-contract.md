@@ -25,7 +25,7 @@
 | 环境 | 当前状态 |
 | --- | --- |
 | Windows 原生 Go CLI / Git Bash 本地协议测试 | 已通过本机协议、跨进程锁、三组 smoke 与隔离 vendor 再生成验证；不等于真实宿主触发验证 |
-| Claude Code CLI 的自动环境注入 | 2026-10-28 在隔离临时项目用真实 CLI 2.1.312 实测：SessionStart 触发，未提供 `CLAUDE_ENV_FILE`；模型调用因隔离配置未登录而失败，故环境注入与 PreToolUse 仍未验证 |
+| Claude Code CLI 的自动环境注入 | 2026-10-28 经 cc-switch 代理实测真实 CLI 2.1.312：SessionStart 与 PreToolUse 已触发并验证；该模式未提供 `CLAUDE_ENV_FILE`，自动注入本身仍未验证，显式 `--session-id` 已验证 |
 | Claude 桌面端 / 恢复会话 | 未实测；不推断与 CLI 一致 |
 | 子代理身份/继承 | 未实测；独立 session_id 按独立身份处理 |
 | Linux/macOS 原生锁和脚本 | 本机为 Windows，不能冒充已验证 |
@@ -53,7 +53,7 @@ SessionStart 适配仅写宿主显式提供的环境文件，并按协议返回�
 | Vendor 同步 | 用本机匹配的上游 superpowers 7.0.0 在隔离临时目录实际重新生成，随后执行生成的两个脚本，通过。 |
 | Linux amd64 / Darwin arm64 | 交叉构建通过；并未在这些系统上运行测试。 |
 
-C01–C24 已分别关联到实际通过的测试；其中 C19 已有真实 CLI 的 SessionStart 证据，**PreToolUse 与自动环境注入没有真实宿主证据**。详细测试名及 RED/GREEN 日志保留在本项目的忽略目录 `.superpowers/sdd/2026-10-28-session-bound-write-gate/`，作为执行记录保留，不删除。
+C01–C24 已分别关联到实际通过的测试；其中 C19 已有真实 CLI 的 SessionStart 与 PreToolUse 证据；**自动环境注入因宿主未提供 `CLAUDE_ENV_FILE` 仍未验证**。详细测试名及 RED/GREEN 日志保留在本项目的忽略目录 `.superpowers/sdd/2026-10-28-session-bound-write-gate/`，作为执行记录保留，不删除。
 
 运行产物路径测试执行真实 Bash 脚本和真实 mulix CLI，但用 Node 进程探针替代外部 HTTP 服务器；它验证目录和环境变量归属，不覆盖未修改的 HTTP 服务内部。跨进程测试覆盖确定的竞争交错，但不能证明所有调度情况。
 
@@ -81,7 +81,7 @@ C01–C24 已分别关联到实际通过的测试；其中 C19 已有真实 CLI 
 | C16 | `TestSessionCLI_ArchiveRaceDoesNotClearNewActive` |
 | C17 | `TestSessionScripts_TwoBindingsProduceSeparateRuntimeDirs` |
 | C18 | `TestResolve_ProjectAndNestedRootIsolation`, `TestHookEval_RequestCWDWinsAndMissingCWDUsesProcess`, `TestSessionScripts_NestedRootAndSpaceInPath` |
-| C19 | `TestSessionStart_OnlyExportsIdentityAndDoesNotBind`, `TestSessionStart_NoEnvFileHasExplicitParameterGuidance`（真实 CLI 仅证实 SessionStart；PreToolUse 与自动环境注入未验证） |
+| C19 | `TestSessionStart_OnlyExportsIdentityAndDoesNotBind`, `TestSessionStart_NoEnvFileHasExplicitParameterGuidance`（真实 CLI 已证实 SessionStart 与 PreToolUse；自动环境注入未验证） |
 | C20 | `TestInit_SessionStartMergeIsIdempotentAndPreservesUserHooks`, `TestUpdate_ReportsMissingSessionIntegrationWithoutEditingSettings`, `smoke-update.sh` 的 DSH-only 场景 |
 | C21 | `TestDecideContext_ProtectsControlPathsBeforeBuildAllowance`, `TestDecideContext_WindowsAliasesAndCaseUseSamePolicy`, `TestDecideContext_WindowsTrailingAliasesNeverReachControlMetadata`, `TestDecideContext_RelativeAliasHasSamePolicyAsAbsolute` |
 | C22 | `TestControlPath_RejectsTraversalSymlinkAndNonRegularTarget`, `TestIdentityAndChangeValidation`, `TestControlMetadata_RejectsBindingAndConfigSymlinks` |
@@ -90,22 +90,23 @@ C01–C24 已分别关联到实际通过的测试；其中 C19 已有真实 CLI 
 
 ## 真实 Claude CLI 临时项目实测（2026-10-28）
 
-真实 CLI 版本 2.1.312。测试只在一个新建临时项目、`--restricted` 模式、显式临时 settings 和独立临时配置目录中运行；没有复制凭证，没有安装到现有项目，也没有改动全局设置。
+真实 CLI 2.1.312（Windows），经 cc-switch 本地代理认证；使用独立临时配置目录和新建临时项目，并在子进程中清除桌面宿主注入的 `CLAUDE_CODE_*` 会话标记。仅加载临时项目设置，限定 `PowerShell`/`Read`/`Write`/`Edit`，再用临时安全钩子把工具限制为一条固定查询和一个合成文件；没有复制凭证，没有安装到现有项目，也没有改动全局设置。
 
 | 观察项 | 结果 |
 | --- | --- |
-| 两个真实 CLI 会话并发启动 | 是（各自独立 session ID，单次预算上限 $0.25，禁用会话持久化） |
-| SessionStart 实际触发 | 两个会话均触发 |
-| SessionStart 的 session ID、cwd、绑定来源与阶段 | 两个会话均与各自绑定一致（来源 `session-binding`，阶段分别为 design 与 build） |
-| 宿主提供 `CLAUDE_ENV_FILE` | 否，因此无法观察自动环境文件写入 |
-| Bash 继承 `MULIX_SESSION_ID` | 未验证 |
-| PreToolUse 实际 Allow/Deny | 未触发：模型调用返回 `api_error`（CLI 报告 `total_cost_usd=0`、0 tokens） |
-| 原项目工作树与已变更文件指纹 | 前后一致 |
-| 指定全局/项目设置与 Git 元数据 | 前后一致 |
+| 并发真实会话 | 3 个（A=design、B=build、A2=design），独立 UUID 与会话绑定；单次预算上限 $0.25，禁用会话持久化 |
+| SessionStart | 3 次均触发；session ID、cwd、来源 `session-binding` 和阶段与各自绑定一致 |
+| PreToolUse：design 会话 Write | deny，exit 2 |
+| PreToolUse：design 会话 Edit（A2） | deny，exit 2 |
+| PreToolUse：build 会话 Write/Edit | allow，exit 0；文件按 seed → alpha → beta 更新 |
+| shell 工具中的身份 | 3 个会话的 PowerShell 查询均以显式 `--session-id` 返回 `session-binding` 与正确阶段 |
+| 宿主提供 `CLAUDE_ENV_FILE` | 否；该模式没有自动环境文件，自动注入未验证 |
+| CLI 报告成本 | A $0.038913、B $0.046704、A2 $0.037737 |
+| 原项目工作树、指定设置与 Git 元数据 | 前后一致 |
 
-失败原因：独立配置目录中的 CLI 登录状态为未登录（`authMethod=none`），桌面应用使用的认证不会被独立 CLI 继承。为避免复制或提取用户凭证，没有为测试另行注入认证。
+补充：Windows 版 CLI 2.1.312 的 shell 工具名是 `PowerShell`；传入 `Bash` 会被静默忽略。自动环境注入只在宿主提供 `CLAUDE_ENV_FILE` 时发生，本次模式未提供，因此使用并验证了**显式 `--session-id`** 的完整链路。
 
-因此：**SessionStart 集成有真实宿主证据；自动环境注入和 PreToolUse 的真实宿主行为仍未验证。** 2026-10-28 用户已接受这一部分验证结果，明确不以此轮临时测试替代 PreToolUse 与环境注入证据。 两个会话的阶段由真实 `mulix` 构建和真实 `state transition` 守卫构造（未使用 `--force`）。原始 CLI 轨迹只保存在临时测试目录，不进入仓库；临时目录在本轮结束后未删除，可由用户确认后移除。
+结论：**SessionStart 与 PreToolUse 已有真实宿主证据；自动环境注入在本次模式中不可用，仍未验证。** 未覆盖：桌面端、恢复会话、子代理、Unix 原生运行，以及宿主提供环境文件时的自动继承。原始轨迹只保存在临时目录，不进入仓库；临时目录保留，可由用户确认后移除。
 
 ## 保留边界
 

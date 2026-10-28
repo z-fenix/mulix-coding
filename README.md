@@ -156,8 +156,10 @@ mulix init --host claude
 Init merges SessionStart plus Write/Edit PreToolUse hooks without replacing
 unrelated hook fields; ordinary `mulix update` never edits host settings.
 An already-open session needs restart/resume or explicit identity parameters.
-Automatic identity propagation in CLI/desktop/resumed/subagent hosts requires
-host support; local protocol tests are not proof of live-host integration.
+A real Claude CLI 2.1.312 probe verified SessionStart and PreToolUse for
+concurrent bound sessions; automatic `CLAUDE_ENV_FILE` injection was not
+available in that mode, so explicit `--session-id` remains the fallback.
+Desktop, resumed sessions, subagents and Unix were not exercised.
 See [integration evidence and limits](docs/verification/session-hook-contract.md).
 DSH-only init installs no Claude hooks; its agents can use explicit identities.
 
