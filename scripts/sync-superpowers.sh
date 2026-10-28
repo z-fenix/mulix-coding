@@ -8,7 +8,7 @@
 #   - every artifact location moves under .mulix/.runtime/ — per change
 #     (.mulix/.runtime/<change>/...) for brainstorming/planning/SDD output,
 #     .mulix/.runtime/_shared/ for change-independent output.
-#   - the scripts resolve <change> themselves from .mulix/active.
+#   - the scripts resolve <change> through mulix context show.
 #
 # Everything else is copied verbatim. Each patch must apply exactly once;
 # upstream drift fails the sync instead of silently shipping a half-
@@ -71,9 +71,12 @@ patch() {
 sp="$dest/skills"
 
 # Brainstorm server: session files go to the active change's runtime dir.
-patch "$sp/brainstorming/scripts/start-server.sh" 's{  SESSION_DIR="\$\{PROJECT_DIR\}/\.mulix/\.runtime/<change>/brainstorm/\$\{SESSION_ID\}"\n}{  # mulix: resolve the active change so sessions land in its runtime dir.\n  MULIX_CHANGE="\$(tr -d "\\r\\n" < "\$\{PROJECT_DIR\}/.mulix/active" 2>/dev/null || true)"\n  RUNTIME_DIR="\$\{PROJECT_DIR\}/.mulix/.runtime/\$\{MULIX_CHANGE:-_shared\}"\n  SESSION_DIR="\$\{RUNTIME_DIR\}/brainstorm/\$\{SESSION_ID\}"\n}g'
+patch "$sp/brainstorming/scripts/start-server.sh" 's{  SESSION_DIR="\$\{PROJECT_DIR\}/\.mulix/\.runtime/<change>/brainstorm/\$\{SESSION_ID\}"\n}{  # mulix: resolve one context snapshot; errors must not become shared output.\n  RUNTIME_DIR="\$(cd "\$PROJECT_DIR" && mulix context show --field runtime-dir)" || exit 1\n  if command -v cygpath >/dev/null 2>&1; then\n    RUNTIME_DIR="\$(cygpath -m "\$RUNTIME_DIR")" || exit 1\n  fi\n  SESSION_DIR="\$\{RUNTIME_DIR\}/brainstorm/\$\{SESSION_ID\}"\n}g'
 patch "$sp/brainstorming/scripts/start-server.sh" 's{export BRAINSTORM_PORT_FILE="\$\{PROJECT_DIR\}/\.mulix/\.runtime/<change>/brainstorm/\.last-port"}{export BRAINSTORM_PORT_FILE="\$\{RUNTIME_DIR\}/brainstorm/.last-port"}g'
 patch "$sp/brainstorming/scripts/start-server.sh" 's{export BRAINSTORM_TOKEN_FILE="\$\{PROJECT_DIR\}/\.mulix/\.runtime/<change>/brainstorm/\.last-token"}{export BRAINSTORM_TOKEN_FILE="\$\{RUNTIME_DIR\}/brainstorm/.last-token"}g'
+
+# The server instance key is not the host session identity.
+perl -pi -e 's{\bSESSION_ID\b}{BRAINSTORM_INSTANCE_ID}g' "$sp/brainstorming/scripts/start-server.sh"
 
 # mulix's .mulix/.runtime/.gitignore already ignores brainstorm sessions;
 # the upstream advice would ignore the whole change runtime dir instead.
@@ -84,7 +87,7 @@ patch "$sp/brainstorming/visual-companion.md" 's{ Remind the user to add `\.muli
 patch "$sp/brainstorming/scripts/server.cjs" "s{const SUPERPOWERS_VERSION = readSuperpowersVersion\\(\\);}{const SUPERPOWERS_VERSION = '$version'; // mulix: vendored copy, fixed version}g"
 
 # SDD workspace: per-plan directories under the active change's runtime dir.
-patch "$sp/subagent-driven-development/scripts/sdd-workspace" 's{base="\$root/\.mulix/\.runtime/<change>/sdd"\n}{# mulix: the workspace lives in the active change\x27s runtime dir. The\n# mulix root (the directory holding .mulix/) may sit below the git root.\nmulix_root=\$PWD\nwhile [ "\$mulix_root" != "/" ] && [ ! -d "\$mulix_root/.mulix" ]; do\n  mulix_root=\$(dirname "\$mulix_root")\ndone\n[ -d "\$mulix_root/.mulix" ] || mulix_root=\$root\nchange=\$(tr -d "\\r\\n" < "\$mulix_root/.mulix/active" 2>/dev/null || true)\nbase="\$mulix_root/.mulix/.runtime/\$\{change:-_shared\}/sdd"\n}g'
+patch "$sp/subagent-driven-development/scripts/sdd-workspace" 's{base="\$root/\.mulix/\.runtime/<change>/sdd"\n}{# mulix: resolve the effective context in the nearest mulix root. The\n# mulix root (the directory holding .mulix/) may sit below the git root.\nmulix_root=\$PWD\nwhile [ "\$mulix_root" != "/" ] && [ ! -d "\$mulix_root/.mulix" ]; do\n  mulix_root=\$(dirname "\$mulix_root")\ndone\n[ -d "\$mulix_root/.mulix" ] || mulix_root=\$root\nruntime_dir=\$(cd "\$mulix_root" && mulix context show --field runtime-dir) || exit 1\nif command -v cygpath >/dev/null 2>&1; then\n  runtime_dir=\$(cygpath -m "\$runtime_dir") || exit 1\nfi\nbase="\$runtime_dir/sdd"\n}g'
 
 # Plan workspaces are the change's execution record in mulix (the build-
 # complete guard reads the ledger and task reports from them), so the

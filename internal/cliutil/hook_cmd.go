@@ -2,65 +2,30 @@ package cliutil
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/spf13/cobra"
-
 	"github.com/z-fenix/mulix-coding/internal/hook"
-	"github.com/z-fenix/mulix-coding/internal/state"
+	"github.com/z-fenix/mulix-coding/internal/sessionctx"
 )
 
-// newHookCmd wires the Claude Code PreToolUse hook entry point: read the
-// request JSON from stdin, decide, write the response JSON to stdout, and
-// exit with the code Claude Code's hook contract expects (0 = allow,
-// 2 = block). Any internal error (no root found, no active change, a
-// corrupt state file) fails OPEN rather than crashing the tool call in a
-// confusing way: it allows the write through and prints a warning to
-// stderr, because a broken hook must never become a way to silently brick
-// every Write/Edit call in the project.
+// The default entry remains mulix hook, as installed by previous releases.
 func newHookCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:    "hook",
-		Short:  "Claude Code PreToolUse hook entry point (reads JSON from stdin)",
-		Hidden: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			req, err := hook.ParseRequest(os.Stdin)
-			if err != nil {
-				return failOpen(fmt.Errorf("hook: %w", err))
-			}
-
-			root, err := state.FindRoot(".")
-			if err != nil {
-				return failOpen(err)
-			}
-			change, err := state.Active(root)
-			if err != nil {
-				return failOpen(err)
-			}
-			s, err := state.Load(root, change)
-			if err != nil {
-				return failOpen(err)
-			}
-
-			decision := hook.Decide(root, s, req)
-			out, err := hook.Render(decision)
-			if err != nil {
-				return failOpen(err)
-			}
-			fmt.Fprintln(os.Stdout, string(out))
-			os.Exit(hook.ExitCode(decision))
-			return nil
-		},
-	}
-}
-
-// failOpen reports why the hook could not evaluate its policy and then
-// allows the tool call through, so a mulix installation/config problem
-// degrades to "no enforcement" rather than "every write is blocked".
-func failOpen(cause error) error {
-	fmt.Fprintf(os.Stderr, "mulix hook: %v (allowing the call through)\n", cause)
-	out, _ := hook.Render(hook.Decision{Allow: true})
-	fmt.Fprintln(os.Stdout, string(out))
-	os.Exit(0)
-	return nil
+	cmd := &cobra.Command{Use: "hook", Short: "Claude Code hook entry point (JSON stdin)", Hidden: true, RunE: func(cmd *cobra.Command, args []string) error {
+		cwd, _ := os.Getwd()
+		payload, readErr := io.ReadAll(os.Stdin)
+		outcome := evaluatePreToolUse(cmd.Context(), cwd, payload)
+		if readErr != nil {
+			outcome = malformedHook(cmd.Context(), cwd, readErr)
+		}
+		if outcome.Cause != nil {
+			fmt.Fprintf(os.Stderr, "mulix hook: %v (allow=%v)\n", outcome.Cause, outcome.Decision.Allow)
+		}
+		strict := outcome.Resolved.Mode == sessionctx.Session || (outcome.Resolved.Root != "" && outcome.Resolved.Mode == "")
+		os.Exit(emitHook(os.Stdout, outcome.Decision, strict, hook.Render))
+		return nil
+	}}
+	cmd.AddCommand(newSessionStartCmd())
+	return cmd
 }

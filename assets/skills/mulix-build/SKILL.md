@@ -46,8 +46,10 @@ skill exactly, including its setup, ledger, reviews, and finish, with
 these mulix specifics:
 
 - **Workspace.** `sdd-workspace` resolves to
-  `.mulix/.runtime/<change>/sdd/tasks/` (it reads the active change from
-  `.mulix/active`). The ledger (`progress.md`), task briefs, reports, test
+  `.mulix/.runtime/<change>/sdd/tasks/` using `mulix context show --field
+  runtime-dir` with the current session identity. Follow the
+  [session context rules](../mulix-using/SKILL.md#session-context), not a direct
+  read of global active. The ledger (`progress.md`), task briefs, reports, test
   logs, and review packages all live there. Run the scripts from the
   project root.
 - **Ledger layout.** Both executors initialize `progress.md` with the

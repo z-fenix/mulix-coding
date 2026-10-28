@@ -13,7 +13,8 @@ human's choice.
 
 Do not author project files in this phase. Claude Code's PreToolUse
 hook checks `Write`/`Edit`, not Bash, MCP, NotebookEdit or other writers;
-missing paths and hook errors fail open (see `mulix-using`). Hosts without
+missing paths are allowed; legacy errors fail open, while invalid session
+context blocks writes (see `mulix-using`). Hosts without
 the hook rely on discipline. This is not a sandbox or permission to route
 around the whitelist. Authorized finishing uses git/CLI commands, which
 are not gated by this hook. Commit the
@@ -33,4 +34,8 @@ mulix state transition archived
 The normal guard requires `archive_confirmation=confirmed`; it checks the
 recorded value, not the authenticity of the human's choice. Transition
 `--force` skips this readiness guard, not the phase table, and must not be
-used to conceal missing consent. Archiving clears the active-change marker.
+used to conceal missing consent. Archiving clears global active only if it
+still points to that archived change. Session bindings remain and report an
+archived target until explicitly selected again or unbound; they never
+silently follow another global change. Apply the
+[session context rules](../mulix-using/SKILL.md#session-context).

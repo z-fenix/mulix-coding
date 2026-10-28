@@ -26,8 +26,12 @@ specify → clarify → design → tasks → build → verify → archive
    against the current phase's whitelist. Read a deny's reason and next
    action; don't retry the same call or route around it. **Bash, MCP,
    NotebookEdit, and other writers are not automatically gated.** Missing
-   `file_path` tool-input fields are allowed. Parsing, root discovery, active/state loading,
-   and response errors **fail open**; no active change also allows calls.
+   `file_path` tool-input fields are allowed. Legacy mode keeps fail-open
+   parsing/root/active/state/output errors. In session mode, invalid bindings,
+   configuration, active/state loading, or lock failures block writes when the
+   project is identifiable; only a missing binding permits global fallback.
+   No current change allows ordinary writes, but session control metadata is
+   still CLI-only. An unidentifiable project root warns and allows the call.
    Hosts without this hook (such as DeepSeek Harness) rely on your
    discipline for all writes. This is not a filesystem security sandbox.
 2. **Guard checks** (`mulix guard <event>`, run automatically inside
@@ -36,6 +40,37 @@ specify → clarify → design → tasks → build → verify → archive
    They do **not** authenticate human consent or prove tests actually
    executed. A transition must be legal from the current phase; `--force`
    skips readiness guards only and cannot make an illegal event legal.
+
+## Session context
+
+Run `mulix context show` to read mode, session, change and source. With no
+configuration the mode is **legacy** and commands use global `.mulix/active`.
+Enable session mode only on the human's instruction with
+`mulix context mode session`.
+
+In **session** mode, use the host-provided identity: `MULIX_SESSION_ID` from
+SessionStart, or explicit `--session-id '<host-id>'` when it is not inherited.
+Explicit identity overrides the environment. No identity means global use;
+an empty/invalid supplied identity is an error, not permission to guess one.
+
+| Source | Next action |
+| --- | --- |
+| `session-binding` | Work on that bound change, regardless of global active. |
+| `global-fallback` | No binding exists; this invocation uses global active. A later global switch affects the next invocation. |
+| Binding invalid or archived | Repair with `mulix state select <change> --session-id '<host-id>'`, or explicitly unbind with `mulix context unbind --session-id '<host-id>'`. A broken binding never falls back. |
+
+In session mode with identity, `new` / `state select` bind only this session.
+`--global` on those two commands changes global active without changing
+bindings. Unbind removes only this session record and resumes global fallback.
+Archiving retains bindings and clears global active only if it still names
+that archived change: an A→X binding with global Y stays bound to archived X,
+not Y, until explicitly repaired or unbound.
+
+For any runtime artifact, query `mulix context show --field runtime-dir`
+with the same identity. SDD and brainstorm scripts use that query themselves.
+A query error stops artifact creation; `_shared` is only for successful
+resolution with no current change. Each running tool/script keeps its startup
+snapshot; a switch affects the next call, not an already-running process.
 
 ## Before doing anything else
 
@@ -72,7 +107,8 @@ hand-offs with phase gates:
 `mulix new "<title>"` creates the change's spec directory
 (`docs/specs/<change>/`), change directory (`docs/changes/<change>/`),
 and runtime directory (`.mulix/.runtime/<change>/`) plus a fresh state in
-the specify phase, and makes it the active change. Do this before
+the specify phase, then selects it for the effective context: the current
+session in session mode with identity, otherwise global active. Do this before
 anything else for a new piece of work — don't start writing a spec by
 hand first. New IDs use the local date, e.g. `2026-10-14-add-login`,
 with `-2`, `-3` for same-day/title collisions. All three directories share

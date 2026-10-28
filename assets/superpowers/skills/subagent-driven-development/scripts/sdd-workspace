@@ -46,15 +46,18 @@ slug=$(basename "$plan" .md)
 # Bash, rev-parse prints C:/Users/... while pwd prints /c/Users/..., and the
 # repo-relative marker check needs both in the same form.
 root=$(CDPATH='' cd -- "$(git rev-parse --show-toplevel)" && pwd -P)
-# mulix: the workspace lives in the active change's runtime dir. The
+# mulix: resolve the effective context in the nearest mulix root. The
 # mulix root (the directory holding .mulix/) may sit below the git root.
 mulix_root=$PWD
 while [ "$mulix_root" != "/" ] && [ ! -d "$mulix_root/.mulix" ]; do
   mulix_root=$(dirname "$mulix_root")
 done
 [ -d "$mulix_root/.mulix" ] || mulix_root=$root
-change=$(tr -d "\r\n" < "$mulix_root/.mulix/active" 2>/dev/null || true)
-base="$mulix_root/.mulix/.runtime/${change:-_shared}/sdd"
+runtime_dir=$(cd "$mulix_root" && mulix context show --field runtime-dir) || exit 1
+if command -v cygpath >/dev/null 2>&1; then
+  runtime_dir=$(cygpath -m "$runtime_dir") || exit 1
+fi
+base="$runtime_dir/sdd"
 
 # Normalize the plan path (physical directory, so relative/absolute/../
 # spellings of one plan compare equal) and express it as the marker value:

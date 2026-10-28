@@ -111,19 +111,21 @@ fi
 umask 077
 
 # Generate unique session directory
-SESSION_ID="$$-$(date +%s)"
+BRAINSTORM_INSTANCE_ID="$$-$(date +%s)"
 
 if [[ -n "$PROJECT_DIR" ]]; then
-  # mulix: resolve the active change so sessions land in its runtime dir.
-  MULIX_CHANGE="$(tr -d "\r\n" < "${PROJECT_DIR}/.mulix/active" 2>/dev/null || true)"
-  RUNTIME_DIR="${PROJECT_DIR}/.mulix/.runtime/${MULIX_CHANGE:-_shared}"
-  SESSION_DIR="${RUNTIME_DIR}/brainstorm/${SESSION_ID}"
+  # mulix: resolve one context snapshot; errors must not become shared output.
+  RUNTIME_DIR="$(cd "$PROJECT_DIR" && mulix context show --field runtime-dir)" || exit 1
+  if command -v cygpath >/dev/null 2>&1; then
+    RUNTIME_DIR="$(cygpath -m "$RUNTIME_DIR")" || exit 1
+  fi
+  SESSION_DIR="${RUNTIME_DIR}/brainstorm/${BRAINSTORM_INSTANCE_ID}"
   # Persist the bound port and key per project so a restart reuses them and an
   # already-open browser tab reconnects to the same URL with a valid cookie.
   export BRAINSTORM_PORT_FILE="${RUNTIME_DIR}/brainstorm/.last-port"
   export BRAINSTORM_TOKEN_FILE="${RUNTIME_DIR}/brainstorm/.last-token"
 else
-  SESSION_DIR="/tmp/brainstorm-${SESSION_ID}"
+  SESSION_DIR="/tmp/brainstorm-${BRAINSTORM_INSTANCE_ID}"
 fi
 
 STATE_DIR="${SESSION_DIR}/state"

@@ -5,11 +5,13 @@
 package hook
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/z-fenix/mulix-coding/internal/flow"
@@ -27,6 +29,7 @@ type ToolInput struct {
 // the full schema; unknown fields are ignored (this is untrusted input
 // from the host, not mulix's own state).
 type Request struct {
+	SessionID     *string   `json:"session_id,omitempty"`
 	HookEventName string    `json:"hook_event_name"`
 	ToolName      string    `json:"tool_name"`
 	ToolInput     ToolInput `json:"tool_input"`
@@ -35,9 +38,20 @@ type Request struct {
 
 // ParseRequest decodes a PreToolUse request from r (normally stdin).
 func ParseRequest(r io.Reader) (Request, error) {
-	var req Request
-	if err := json.NewDecoder(r).Decode(&req); err != nil {
+	var raw json.RawMessage
+	if err := json.NewDecoder(r).Decode(&raw); err != nil {
 		return Request{}, fmt.Errorf("hook: decoding request: %w", err)
+	}
+	var req Request
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return Request{}, fmt.Errorf("hook: decoding request: %w", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return Request{}, err
+	}
+	if fields == nil || bytes.Equal(bytes.TrimSpace(fields["session_id"]), []byte("null")) {
+		return Request{}, fmt.Errorf("hook: expected an object with an absent or string session_id, not null")
 	}
 	return req, nil
 }
@@ -124,7 +138,7 @@ func decideRuntime(s flow.State, rel string) Decision {
 			Next:   "Use `mulix state select <change>` if you meant to work on that change.",
 		}
 	}
-	if rel == path.Join(own, layout.StateFile) {
+	if samePath(rel, path.Join(own, layout.StateFile)) {
 		return Decision{
 			Allow:  false,
 			Reason: fmt.Sprintf("%s is mulix's own state file and must not be edited directly.", rel),
@@ -199,12 +213,41 @@ func changeDirFor(s flow.State) string {
 // is assumed to be root-relative, matching what Claude Code's hooks
 // typically pass for file_path.
 func relativeSlash(root, p string) string {
-	if filepath.IsAbs(p) {
-		if rel, err := filepath.Rel(root, p); err == nil {
-			p = rel
-		}
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(root, p)
+	}
+	if rel, err := filepath.Rel(canonicalPath(root), canonicalPath(p)); err == nil {
+		p = rel
 	}
 	return filepath.ToSlash(filepath.Clean(p))
+}
+
+// Write targets may not exist yet. Resolve the nearest existing ancestor so
+// Windows short names and long names do not identify different policy roots.
+func canonicalPath(p string) string {
+	current := filepath.Clean(p)
+	var suffix []string
+	for {
+		if resolved, err := filepath.EvalSymlinks(current); err == nil {
+			for i := len(suffix) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, suffix[i])
+			}
+			return resolved
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return p
+		}
+		suffix = append(suffix, filepath.Base(current))
+		current = parent
+	}
+}
+
+func samePath(a, b string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 // isUnder reports whether rel is exactly prefix or nested under it, doing
@@ -212,5 +255,8 @@ func relativeSlash(root, p string) string {
 // prefix "specs/1".
 func isUnder(rel, prefix string) bool {
 	prefix = strings.TrimSuffix(filepath.ToSlash(prefix), "/")
+	if runtime.GOOS == "windows" {
+		rel, prefix = strings.ToLower(rel), strings.ToLower(prefix)
+	}
 	return rel == prefix || strings.HasPrefix(rel, prefix+"/")
 }

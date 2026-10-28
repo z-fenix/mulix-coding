@@ -15,6 +15,12 @@ if [ -z "$bin" ]; then
   bin="$work/mulix"
   (cd "$repo" && go build -o "$bin" ./cmd/mulix)
 fi
+bin="$(cd "$(dirname "$bin")" && pwd)/$(basename "$bin")"
+mkdir "$work/cli"
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) cli_name=mulix.exe ;; *) cli_name=mulix ;; esac
+cp "$bin" "$work/cli/$cli_name"
+export PATH="$work/cli:$PATH"
+unset MULIX_SESSION_ID
 mulix() { "$bin" "$@"; }
 
 mkdir "$work/project"
@@ -86,9 +92,10 @@ expect_fail mulix state transition design-approved   # not approved yet
 mulix state set design_approved true >/dev/null
 mulix state transition design-approved >/dev/null
 
-# The brainstorm server's session dir resolves to the active change.
-sp=.claude/skills/brainstorming/scripts/start-server.sh
-grep -q 'RUNTIME_DIR="${PROJECT_DIR}/.mulix/.runtime/${MULIX_CHANGE:-_shared}"' "$sp"
+# The launcher uses this real context query; its process/env behavior is
+# exercised by TestSessionScripts_* rather than matching a source-code line.
+runtime=$(mulix context show --field runtime-dir)
+case "$runtime" in *"$c") ;; *) printf 'FAIL: runtime context is %s\n' "$runtime" >&2; exit 1 ;; esac
 
 step tasks
 expect_hook allow "docs/changes/$c/tasks.md"

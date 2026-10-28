@@ -15,7 +15,7 @@ func newInitCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "init",
-		Short: "Install mulix into a project: .mulix/, the mulix and superpowers skills for the selected agent hosts, and the PreToolUse hook (Claude Code only)",
+		Short: "Install mulix into a project: .mulix/, the mulix and superpowers skills for the selected agent hosts, and the PreToolUse/SessionStart hooks (Claude Code only)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			parsedHosts, err := scaffold.ParseHosts(hosts)
 			if err != nil {
@@ -35,6 +35,7 @@ func newInitCmd() *cobra.Command {
 				return err
 			}
 			fmt.Println("mulix initialized. Run `mulix new \"<title>\"` to start your first change.")
+			fmt.Println("note: init preserves context mode. Opt in with `mulix context mode session`; existing sessions need restart/resume or explicit --session-id for identity propagation.")
 			for _, h := range parsedHosts {
 				if h == scaffold.HostClaude {
 					fmt.Println("note (Claude Code): the skills are installed as project skills in .claude/skills/. If the superpowers plugin is also enabled, disable it for this project so its SessionStart bootstrap and namespaced skills don't compete with mulix's phase gates.")

@@ -85,16 +85,81 @@ Two mechanisms provide workflow control from that state:
 
 The hook matches **only `Write|Edit`**. Bash, MCP, NotebookEdit, and other
 filesystem-writing tools are not automatically intercepted. Missing tool-input
-`file_path` fields are allowed; request parsing, root discovery, active/state loading,
-and response-generation failures **fail open**. No active change also
-allows the call. DeepSeek Harness has no equivalent hook: agents follow
-phase discipline, while CLI transitions run guards.
+`file_path` fields are allowed. **Legacy mode** retains fail-open behavior for
+request parsing, root discovery, active/state loading, and output errors.
+**Session mode** blocks invalid bindings, configuration, active/state loading,
+and lock errors when the project is identifiable; missing bindings alone
+fall back to global active. An unidentifiable project root still warns and
+allows the call. No current change allows ordinary writes, while session-mode
+control metadata stays CLI-only. DeepSeek Harness has no equivalent hook:
+agents follow phase discipline, while CLI transitions run guards.
 
 Guards check the **structure of recorded evidence**, not whether a human
 really approved something or a test actually ran. `flow.Table.GuardRefs`
 is the single source of readiness checks. `state transition --force`
 skips readiness only, never an illegal phase/event check. Neither hook nor
 guards authenticate a local writer or make the filesystem unbypassable.
+
+## Multiple sessions in one checkout
+
+Existing and newly initialized projects default to **legacy** mode. To opt in:
+
+```bash
+mulix context mode session
+```
+
+Use the real identity supplied by the host, not a made-up ID. When SessionStart
+provides `MULIX_SESSION_ID`, commands inherit it; otherwise pass `--session-id`
+explicitly. For example, if the host supplied `session-A`:
+
+```bash
+mulix state select 2026-10-28-add-login --session-id session-A
+```
+
+`new` and `state select` then affect only that session. `--global` on either
+command updates `.mulix/active` without changing session bindings. Without a
+session identity, commands keep using global active. Query the effective
+selection and its `session-binding`, `global-fallback`, or `global` source:
+
+```bash
+mulix context show --json
+```
+
+An unbound session dynamically follows global active at each new invocation;
+merely reading the context never binds it. A damaged/missing-target/archived
+binding is an error, not a reason to use a different global change. Repair it
+by selecting a valid change for that session, or explicitly return to fallback:
+
+```bash
+mulix context unbind --session-id session-A
+```
+
+Archiving keeps session bindings and only clears global active if it still
+points to the archived change. An already-running script keeps its startup
+context. SDD and brainstorm scripts query `mulix context show --field
+runtime-dir`; a failed query stops them rather than writing into `_shared`.
+
+Context files, hashed-ID binding files, and persistent lock files live under
+`.mulix/context.json`, `.mulix/sessions/`, and `.mulix/.locks/`, ignored by local
+rules installed by init. Session-mode writes require unambiguous Windows path
+components (no trailing-dot/space aliases), and relative targets use the same
+physical-path policy as absolute targets. State updates use bounded native process locks. This
+isolates context, **not source-file edits, Git branches, ports or databases**;
+multiple sessions editing the same source still need coordination.
+
+After upgrading the CLI/resources, install the new startup hook explicitly:
+
+```bash
+mulix init --host claude
+```
+
+Init merges SessionStart plus Write/Edit PreToolUse hooks without replacing
+unrelated hook fields; ordinary `mulix update` never edits host settings.
+An already-open session needs restart/resume or explicit identity parameters.
+Automatic identity propagation in CLI/desktop/resumed/subagent hosts requires
+host support; local protocol tests are not proof of live-host integration.
+See [integration evidence and limits](docs/verification/session-hook-contract.md).
+DSH-only init installs no Claude hooks; its agents can use explicit identities.
 
 ## Embedded superpowers
 
@@ -111,7 +176,7 @@ compete with the phase gates.
 `scripts/sync-superpowers.sh <superpowers-dir>` regenerates the vendored
 copy. It rewrites `superpowers:<skill>` references to the unprefixed
 names, moves every artifact location under `.mulix/.runtime/` (the
-scripts resolve the change from `.mulix/active`), and applies a small set
+scripts resolve the effective change through `mulix context show`), and applies a small set
 of exact patches — brainstorming's terminal states give way to mulix's
 design gate, writing-plans writes `docs/changes/<change>/tasks.md` with
 `## Task N` headings and no execution handoff, the executors keep their
@@ -136,8 +201,8 @@ mulix init
 This writes `.mulix/` (shared constitution, bundled templates, the
 superpowers license/version, `.mulix/.runtime/.gitignore`, and the
 `active`-change marker once a change exists), the skills for the
-selected agent hosts, and — for Claude Code — merges a `PreToolUse`
-hook entry into `.claude/settings.json` without disturbing any
+selected agent hosts, and — for Claude Code — merges `PreToolUse` and
+`SessionStart` hook entries into `.claude/settings.json` without disturbing any
 hooks/settings you already have. It does not create `docs/specs/` or
 `docs/changes/` — those come from `mulix new`, once there's an actual
 change to hold. `--dir` targets a project directory other than the

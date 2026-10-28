@@ -97,6 +97,12 @@ func Init(opts InitOptions) (res InitResult, err error) {
 		return res, err
 	}
 
+	if changed, err := ensureContextIgnore(opts.Root); err != nil {
+		return res, err
+	} else if changed {
+		res.Written = append(res.Written, ".mulix/.gitignore")
+	}
+
 	for _, h := range hosts {
 		if !h.installsHook() {
 			continue
@@ -203,13 +209,16 @@ type claudeSettings struct {
 }
 
 type hookMatcherGroup struct {
-	Matcher string      `json:"matcher,omitempty"`
-	Hooks   []hookEntry `json:"hooks"`
+	Matcher string                     `json:"matcher,omitempty"`
+	Hooks   []hookEntry                `json:"hooks"`
+	Extra   map[string]json.RawMessage `json:"-"`
 }
 
 type hookEntry struct {
-	Type    string `json:"type"`
-	Command string `json:"command"`
+	Type    string                     `json:"type"`
+	Command string                     `json:"command,omitempty"`
+	Timeout float64                    `json:"timeout,omitempty"`
+	Extra   map[string]json.RawMessage `json:"-"`
 }
 
 // installClaudeHooks merges mulix's PreToolUse hook into
@@ -240,6 +249,15 @@ func installClaudeHooks(res *InitResult, opts InitOptions) error {
 
 	mulixHookCmd := "mulix hook"
 	changed := mergeHookEntry(hooks, "PreToolUse", "Write|Edit", mulixHookCmd, opts.Force)
+	if mergeHookEntry(hooks, "SessionStart", "", "mulix hook session-start", opts.Force) {
+		changed = true
+	}
+	if ensureMulixHookTimeout(hooks, "PreToolUse", mulixHookCmd) {
+		changed = true
+	}
+	if ensureMulixHookTimeout(hooks, "SessionStart", "mulix hook session-start") {
+		changed = true
+	}
 
 	if len(hooks) > 0 {
 		encoded, err := json.MarshalIndent(hooks, "", "  ")
@@ -261,7 +279,11 @@ func installClaudeHooks(res *InitResult, opts InitOptions) error {
 	if err != nil {
 		return fmt.Errorf("scaffold: encoding %s: %w", path, err)
 	}
-	if err := os.WriteFile(path, out, 0o644); err != nil {
+	mode := fs.FileMode(0o644)
+	if info, err := os.Lstat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+	if err := writeFileMode(path, out, mode); err != nil {
 		return fmt.Errorf("scaffold: writing %s: %w", path, err)
 	}
 	res.Written = append(res.Written, ".claude/settings.json")

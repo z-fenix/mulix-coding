@@ -26,6 +26,13 @@ const RuntimeDir = ".mulix/.runtime"
 // active). It is never a change id.
 const Shared = "_shared"
 
+// Context metadata is project-local, separate from change-owned runtime output.
+const (
+	ContextFile = ".mulix/context.json"
+	SessionsDir = ".mulix/sessions"
+	LocksDir    = ".mulix/.locks"
+)
+
 // Subdirectories of a change's runtime directory.
 const (
 	// StateFile is mulix's own phase state. Never hand-edited.

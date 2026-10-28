@@ -10,7 +10,6 @@ import (
 
 	"github.com/z-fenix/mulix-coding/internal/flow"
 	"github.com/z-fenix/mulix-coding/internal/guard"
-	"github.com/z-fenix/mulix-coding/internal/state"
 )
 
 // Version is set by the build (see cmd/mulix/main.go); kept here so the
@@ -26,7 +25,9 @@ func NewRootCmd() *cobra.Command {
 		SilenceErrors: true,
 	}
 
+	root.PersistentFlags().String("session-id", "", "session identity (otherwise MULIX_SESSION_ID, then global context)")
 	root.AddCommand(
+		newContextCmd(),
 		newInitCmd(),
 		newUpdateCmd(),
 		newNewCmd(),
@@ -38,15 +39,6 @@ func NewRootCmd() *cobra.Command {
 		newVersionCmd(),
 	)
 	return root
-}
-
-// resolveChange returns the change id to operate on: explicit flagChange
-// if set, otherwise the project's active change.
-func resolveChange(root, flagChange string) (string, error) {
-	if flagChange != "" {
-		return flagChange, nil
-	}
-	return state.Active(root)
 }
 
 // printGuardReport renders a guard.Report the same way everywhere: a

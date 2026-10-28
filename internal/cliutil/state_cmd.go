@@ -2,178 +2,170 @@ package cliutil
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
 	"github.com/z-fenix/mulix-coding/internal/flow"
 	"github.com/z-fenix/mulix-coding/internal/guard"
 	"github.com/z-fenix/mulix-coding/internal/layout"
+	"github.com/z-fenix/mulix-coding/internal/sessionctx"
 	"github.com/z-fenix/mulix-coding/internal/state"
 )
 
 func newStateCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "state",
-		Short: "Inspect and transition a change's phase state",
-	}
-	cmd.AddCommand(
-		newStateShowCmd(),
-		newStateTransitionCmd(),
-		newStateSelectCmd(),
-		newStateSetFieldCmd(),
-	)
+	cmd := &cobra.Command{Use: "state", Short: "Inspect and transition a change's phase state"}
+	cmd.AddCommand(newStateShowCmd(), newStateTransitionCmd(), newStateSelectCmd(), newStateSetFieldCmd())
 	return cmd
 }
 
 func newStateShowCmd() *cobra.Command {
 	var change string
-	cmd := &cobra.Command{
-		Use:   "show",
-		Short: "Print the current state for a change (defaults to the active change)",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			root, err := state.FindRoot(".")
-			if err != nil {
-				return err
-			}
-			id, err := resolveChange(root, change)
-			if err != nil {
-				return err
-			}
-			s, err := state.Load(root, id)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("change:        %s\n", s.Change)
-			fmt.Printf("phase:         %s\n", s.Phase)
-			fmt.Printf("branch:        %s\n", s.Branch)
-			fmt.Printf("runtime_dir:   %s\n", layout.ChangeRuntimeDir(s.Change))
-			fmt.Printf("spec_path:     %s\n", s.SpecPath)
-			fmt.Printf("tasks_path:    %s\n", s.TasksPath)
-			fmt.Printf("design:        track=%s approved=%v path=%s\n", s.DesignTrack, s.DesignApproved, s.DesignPath)
-			fmt.Printf("execution:     %s\n", s.ExecutionMethod)
-			fmt.Printf("report_path:   %s\n", s.ReportPath)
-			fmt.Printf("verify_result: %s (failures: %d)\n", s.VerifyResult, s.VerifyFailures)
-			fmt.Printf("archived:      %v\n", s.Archived)
-			printNextEvents(s.Phase)
-			return nil
-		},
-	}
-	cmd.Flags().StringVar(&change, "change", "", "change id (defaults to the active change)")
+	cmd := &cobra.Command{Use: "show", Short: "Print state for the effective or explicitly requested change", RunE: func(cmd *cobra.Command, args []string) error {
+		_, r, err := resolveCommandContext(cmd, change, sessionctx.Inspect)
+		if err != nil {
+			return err
+		}
+		if err := requireChange(r); err != nil {
+			return err
+		}
+		s := *r.State
+		printContextSummary(r)
+		fmt.Printf("change:        %s\n", s.Change)
+		fmt.Printf("phase:         %s\n", s.Phase)
+		fmt.Printf("branch:        %s\n", s.Branch)
+		fmt.Printf("runtime_dir:   %s\n", layout.ChangeRuntimeDir(s.Change))
+		fmt.Printf("spec_path:     %s\n", s.SpecPath)
+		fmt.Printf("tasks_path:    %s\n", s.TasksPath)
+		fmt.Printf("design:        track=%s approved=%v path=%s\n", s.DesignTrack, s.DesignApproved, s.DesignPath)
+		fmt.Printf("execution:     %s\n", s.ExecutionMethod)
+		fmt.Printf("report_path:   %s\n", s.ReportPath)
+		fmt.Printf("verify_result: %s (failures: %d)\n", s.VerifyResult, s.VerifyFailures)
+		fmt.Printf("archived:      %v\n", s.Archived)
+		printNextEvents(s.Phase)
+		return nil
+	}}
+	cmd.Flags().StringVar(&change, "change", "", "change id (defaults to effective context)")
 	return cmd
+}
+
+func writableState(r sessionctx.Resolved, current flow.State) error {
+	if r.Mode == sessionctx.Session && r.Source != sessionctx.ExplicitChange && current.Archived {
+		return fmt.Errorf("change %q is archived; select another change or unbind", current.Change)
+	}
+	return nil
 }
 
 func newStateTransitionCmd() *cobra.Command {
 	var change string
 	var force bool
-	cmd := &cobra.Command{
-		Use:   "transition <event>",
-		Short: "Run guard checks for an event and, if they all pass, advance the change's phase",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			root, err := state.FindRoot(".")
-			if err != nil {
+	cmd := &cobra.Command{Use: "transition <event>", Short: "Check guards and advance state under the change lock", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		store, r, err := resolveCommandContext(cmd, change, sessionctx.Mutate)
+		if err != nil {
+			return err
+		}
+		if err := requireChange(r); err != nil {
+			return err
+		}
+		from := r.Phase
+		result, err := state.Update(cmd.Context(), store.Root(), r.Change, func(s *flow.State) error {
+			if err := writableState(r, *s); err != nil {
 				return err
 			}
-			id, err := resolveChange(root, change)
-			if err != nil {
-				return err
-			}
-			s, err := state.Load(root, id)
-			if err != nil {
-				return err
-			}
-
+			from = s.Phase
 			event := flow.Event(args[0])
 			if _, ok := flow.Find(s.Phase, event); !ok {
 				return fmt.Errorf("event %q is not legal from phase %q", event, s.Phase)
 			}
-
-			report := guard.Run(root, s, event)
+			report := guard.Run(store.Root(), *s, event)
 			printGuardReport(report)
 			if !report.Passed() && !force {
 				return fmt.Errorf("guard checks failed for event %q (use --force to override; not recommended)", event)
 			}
-
-			next, err := flow.Apply(s, event)
-			if err != nil {
-				return err
+			next, err := flow.Apply(*s, event)
+			if err == nil {
+				*s = next
 			}
-			if err := state.Save(root, next); err != nil {
-				return err
+			return err
+		}, func(next flow.State) error {
+			if next.Phase != flow.PhaseArchive || !next.Archived {
+				return nil
 			}
-			if next.Phase == flow.PhaseArchive && next.Archived && state.ActiveIs(root, id) {
-				if err := state.ClearActive(root); err != nil {
-					return err
-				}
-				fmt.Printf("cleared active change (was %q; now archived)\n", id)
+			cleared, err := store.ClearActiveIf(cmd.Context(), next.Change)
+			if cleared {
+				fmt.Printf("cleared active change (was %q; now archived)\n", next.Change)
 			}
-			fmt.Printf("transitioned %q: %s -> %s\n", id, s.Phase, next.Phase)
-			printNextEvents(next.Phase)
-			return nil
-		},
-	}
-	cmd.Flags().StringVar(&change, "change", "", "change id (defaults to the active change)")
-	cmd.Flags().BoolVar(&force, "force", false, "skip readiness guards for a legal transition (does not allow illegal phase events; recovery only)")
+			return err
+		})
+		if result.Saved {
+			printContextSummary(r)
+			fmt.Printf("transitioned %q: %s -> %s\n", r.Change, from, result.State.Phase)
+			printNextEvents(result.State.Phase)
+		}
+		if err != nil && result.Saved {
+			return fmt.Errorf("state saved; post-save cleanup failed: %w", err)
+		}
+		return err
+	}}
+	cmd.Flags().StringVar(&change, "change", "", "change id (must match a session's effective context)")
+	cmd.Flags().BoolVar(&force, "force", false, "skip readiness guards for a legal transition (recovery only)")
 	return cmd
 }
 
 func newStateSelectCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "select <change>",
-		Short: "Set the active change for commands that omit --change",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			root, err := state.FindRoot(".")
-			if err != nil {
-				return err
-			}
-			if !state.Exists(root, args[0]) {
-				return fmt.Errorf("no state found for change %q", args[0])
-			}
-			if err := state.SetActive(root, args[0]); err != nil {
-				return err
-			}
-			fmt.Printf("active change set to %q\n", args[0])
-			return nil
-		},
-	}
+	var global bool
+	cmd := &cobra.Command{Use: "select <change>", Short: "Select for this session, or global active with --global", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		store, err := sessionctx.Open(".")
+		if err != nil {
+			return err
+		}
+		id, err := sessionIdentity(cmd, os.LookupEnv)
+		if err != nil {
+			return err
+		}
+		target, err := store.PrepareSelection(cmd.Context(), id, global)
+		if err != nil {
+			return err
+		}
+		selected, err := store.Select(cmd.Context(), target, args[0])
+		if err != nil {
+			return err
+		}
+		printSelection(selected)
+		return nil
+	}}
+	cmd.Flags().BoolVar(&global, "global", false, "update global active without changing session bindings")
 	return cmd
 }
 
 func newStateSetFieldCmd() *cobra.Command {
 	var change string
 	cmd := &cobra.Command{
-		Use:   "set <field> <value>",
-		Short: "Set one artifact-path or flag field on a change's state (does not change phase)",
-		Long: "Set one of a small allow-list of fields on a change's state: spec_path, " +
-			"tasks_path, report_path, clarify_skipped, design_track (bounded|architectural), " +
-			"design_path, design_approved, execution_method (subagent-driven|inline), " +
-			"verify_result, archive_confirmation. This never advances the phase; use `mulix state transition` for that.",
-		Args: cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			root, err := state.FindRoot(".")
+		Use: "set <field> <value>", Short: "Set an allowed artifact-path or flag field without changing phase",
+		Long: "Set spec_path, tasks_path, report_path, clarify_skipped, design_track, design_path, design_approved, execution_method, verify_result or archive_confirmation. Use transition to advance phases.",
+		Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+			store, r, err := resolveCommandContext(cmd, change, sessionctx.Mutate)
 			if err != nil {
 				return err
 			}
-			id, err := resolveChange(root, change)
+			if err := requireChange(r); err != nil {
+				return err
+			}
+			_, err = state.Update(cmd.Context(), store.Root(), r.Change, func(s *flow.State) error {
+				if err := writableState(r, *s); err != nil {
+					return err
+				}
+				return setField(s, args[0], args[1])
+			}, nil)
 			if err != nil {
 				return err
 			}
-			s, err := state.Load(root, id)
-			if err != nil {
-				return err
-			}
-			if err := setField(&s, args[0], args[1]); err != nil {
-				return err
-			}
-			if err := state.Save(root, s); err != nil {
-				return err
-			}
-			fmt.Printf("set %s=%s on %q\n", args[0], args[1], id)
+			printContextSummary(r)
+			fmt.Printf("set %s=%s on %q\n", args[0], args[1], r.Change)
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&change, "change", "", "change id (defaults to the active change)")
+	cmd.Flags().StringVar(&change, "change", "", "change id (must match a session's effective context)")
 	return cmd
 }
 

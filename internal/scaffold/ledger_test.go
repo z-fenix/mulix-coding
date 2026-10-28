@@ -10,7 +10,9 @@ import (
 	"testing"
 
 	"github.com/z-fenix/mulix-coding/assets"
+	"github.com/z-fenix/mulix-coding/internal/flow"
 	"github.com/z-fenix/mulix-coding/internal/guard"
+	"github.com/z-fenix/mulix-coding/internal/state"
 )
 
 const ledgerPlan = "docs/changes/001-ledger/tasks.md"
@@ -42,6 +44,11 @@ func ledgerFixture(t *testing.T, host Host) (string, string) {
 			t.Fatal(err)
 		}
 	}
+	s := flow.New("001-ledger", "")
+	s.Phase = flow.PhaseBuild
+	if err := state.Save(root, s); err != nil {
+		t.Fatal(err)
+	}
 	skills := ".claude/skills"
 	if host == HostDSH {
 		skills = ".dsh/skills"
@@ -53,6 +60,7 @@ func ledgerCommand(t *testing.T, root, name string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command(name, args...)
 	cmd.Dir = root
+	cmd.Env = scriptEnv("")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s %v: %v\n%s", name, args, err, out)
@@ -219,6 +227,7 @@ func TestTaskDone_FailureDoesNotCreateLedger(t *testing.T) {
 	base := ledgerCommand(t, root, "git", "rev-parse", "HEAD")
 	cmd := exec.Command("bash", skills+"/executing-plans/scripts/task-done", ledgerPlan, "1", base, "--", "bash", "-c", "printf 'expected failure\\n'; exit 7")
 	cmd.Dir = root
+	cmd.Env = scriptEnv("")
 	out, err := cmd.CombinedOutput()
 	if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 7 {
 		t.Fatalf("got %v, want exit 7:\n%s", err, out)

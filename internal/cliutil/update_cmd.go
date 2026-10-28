@@ -2,6 +2,7 @@ package cliutil
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -37,6 +38,11 @@ func newUpdateCmd() *cobra.Command {
 			}
 			if res.NeedsAttention() {
 				return fmt.Errorf("update requires manual action; resolve the reported conflicts or blocked files")
+			}
+			if needed, err := scaffold.NeedsSessionHook(root); err != nil {
+				fmt.Fprintf(os.Stderr, "note: could not inspect session hook integration: %v\n", err)
+			} else if needed {
+				fmt.Println("note: session startup integration is missing; run mulix init --host claude explicitly to merge hooks. update has not changed settings.")
 			}
 			return nil
 		},
