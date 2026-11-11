@@ -26,6 +26,16 @@ mulix state set report_path docs/changes/<change>/report.md
 mulix state set verify_result pass    # or: fail
 ```
 
+## Temporary output
+
+Query `mulix context show --field scratch-dir` with the current session identity
+and use its private `verification/` directory for full command output, scratch
+tools and build binaries. The retained result is the command/output summary and
+requirement check in `docs/changes/<change>/report.md`; copy the relevant evidence
+there rather than relying on a temporary file as the only record. Existing SDD
+records stay read-only in this phase. See the
+[Runtime artifact policy](../mulix-using/SKILL.md#runtime-artifact-policy).
+
 ## If it passes
 
 ```

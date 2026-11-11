@@ -39,8 +39,8 @@ bash scripts/start-server.sh --project-dir /path/to/project --open
 
 # Returns: {"type":"server-started","port":52341,
 #           "url":"http://localhost:52341/?key=ab12…",
-#           "screen_dir":"/path/to/project/.mulix/.runtime/<change>/brainstorm/12345-1706000000/content",
-#           "state_dir":"/path/to/project/.mulix/.runtime/<change>/brainstorm/12345-1706000000/state"}
+#           "screen_dir":"<scratch-dir>/brainstorm/session.A1b2C3/content",
+#           "state_dir":"<scratch-dir>/brainstorm/session.A1b2C3/state"}
 ```
 
 Save `screen_dir` and `state_dir` from the response. With `--open`, the browser opens itself when you push the first screen — you don't need to ask the user to open it, but still share the URL as a fallback (headless/remote setups won't auto-open).
@@ -53,9 +53,9 @@ the network can't read the screens or inject events. After the first load the
 browser remembers the key via a cookie, so reloads and `/files/*` assets work
 without repeating it.
 
-**Finding connection info:** The server writes its startup JSON to `$STATE_DIR/server-info`. If you launched the server in the background and didn't capture stdout, read that file to get the URL and port. When using `--project-dir`, check `<project>/.mulix/.runtime/<change>/brainstorm/` for the session directory.
+**Finding connection info:** The server writes its startup JSON to `$STATE_DIR/server-info`. If you launched the server in the background and didn't capture stdout, read that file to get the URL and port. Use the saved `screen_dir` and `state_dir`; if needed, query `mulix context show --field scratch-dir` from the same project and session, then inspect its `brainstorm/` directory.
 
-**Note:** Pass the project root as `--project-dir` so mockups persist in `.mulix/.runtime/<change>/brainstorm/` and survive server restarts. Without it, files go to `/tmp` and get cleaned up. Session directories are already git-ignored by `.mulix/.runtime/.gitignore` (written by `mulix init`) — they hold the session key.
+**Note:** Pass the project root as `--project-dir` so mulix resolves the current context and stores all companion files in private system scratch. No current change is required; an invalid context stops startup. Capture the startup JSON paths: temporary files may be cleaned by the system and are not part of the archived change.
 
 **Launching the server by platform:**
 
@@ -291,7 +291,7 @@ If `$STATE_DIR/events` doesn't exist, the user didn't interact with the browser 
 bash scripts/stop-server.sh $SESSION_DIR
 ```
 
-If the session used `--project-dir`, mockup files persist in `.mulix/.runtime/<change>/brainstorm/` for later reference. Only `/tmp` sessions get deleted on stop.
+Companion files are temporary, not retained runtime artifacts. The stop script removes sessions under `/tmp`; other system-temp locations may remain until system cleanup. Historical persistent directories are left untouched.
 
 ## Reference
 

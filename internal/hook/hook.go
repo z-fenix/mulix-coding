@@ -68,18 +68,12 @@ type Decision struct {
 // allowed unconditionally, including tools capable of filesystem writes.
 var gatedTools = map[string]bool{"Write": true, "Edit": true}
 
-// runtimeWritable lists, per phase, the subdirectories of the active
-// change's .mulix/.runtime/<change>/ that phase may write: the design
-// phase's brainstorming output (design doc, visual-companion screens) and
-// the build phase's execution workspace. Build and verify also produce
-// verification evidence and runtime migration records. state.yaml is in
-// no list: agents must use the state CLI rather than raw edits. This
-// Write/Edit restriction does not stop state edits through other tools
-// or authenticate its content.
+// runtimeWritable contains only retained change artifacts. Transient service
+// files and verification output belong in the resolved system scratch directory.
+// state.yaml stays CLI-only; this is a Write/Edit policy, not a sandbox.
 var runtimeWritable = map[flow.Phase][]string{
-	flow.PhaseDesign: {layout.DesignDir, layout.BrainstormDir},
-	flow.PhaseBuild:  {layout.SddDir, layout.VerificationDir, layout.MigrationsDir},
-	flow.PhaseVerify: {layout.VerificationDir, layout.MigrationsDir},
+	flow.PhaseDesign: {layout.DesignDir},
+	flow.PhaseBuild:  {layout.SddDir},
 }
 
 // Decide applies the phase whitelist to req against root/s. root is the
@@ -122,14 +116,9 @@ func Decide(root string, s flow.State, req Request) Decision {
 	}
 }
 
-// decideRuntime handles writes under .mulix/.runtime/: the shared
-// directory is always writable, another change's directory never is, and
-// the active change's directory only in the subdirectories its current
-// phase produces.
+// decideRuntime permits only phase-owned retained artifacts. Legacy shared
+// output and another change's directory are not writable destinations.
 func decideRuntime(s flow.State, rel string) Decision {
-	if isUnder(rel, path.Join(layout.RuntimeDir, layout.Shared)) {
-		return Decision{Allow: true}
-	}
 	own := layout.ChangeRuntimeDir(s.Change)
 	if !isUnder(rel, own) {
 		return Decision{
@@ -161,7 +150,7 @@ func decideRuntime(s flow.State, rel string) Decision {
 	return Decision{
 		Allow:  false,
 		Reason: reason,
-		Next:   "Runtime artifacts belong to the phase that produces them: design docs and brainstorm screens to design, execution workspaces to build, verification evidence and migration records to build or verify.",
+		Next:   "Retained runtime artifacts belong to their phase: design docs under specs/ in design, execution workspaces under sdd/ in build. Query mulix context show --field scratch-dir for temporary companion, diagnostic, verification or migration output.",
 	}
 }
 

@@ -167,8 +167,12 @@ its brief, not here.
 ## The Task Loop
 
 Everything you print, and every tool result, stays resident in your
-context for the rest of the session. Redirect long test output to a file
-in the workspace and read its tail; read a brief, not the whole plan.
+context for the rest of the session. Under mulix, query
+`mulix context show --field scratch-dir` with the current identity and put
+ad-hoc RED, rerun, debug and build output in its `verification/` directory.
+Keep command/result summaries and relevant RED/GREEN evidence in the existing
+task report and ledger. Only task-done maintains `task-N-tests.log` in the
+retained workspace. Read a brief, not the whole plan.
 
 ### 1. Take the task
 

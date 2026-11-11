@@ -82,7 +82,7 @@ func TestResolve_BoundAndUnboundAreIndependent(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, err = resolveTest(s, "B")
-	if err != nil || b.Change != "" || b.State != nil || !strings.HasSuffix(filepath.ToSlash(b.RuntimeDir), "/.mulix/.runtime/_shared") {
+	if err != nil || b.Change != "" || b.State != nil || b.RuntimeDir != "" {
 		t.Fatalf("empty context: %+v %v", b, err)
 	}
 }

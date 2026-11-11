@@ -219,29 +219,34 @@ func brainProbe(t *testing.T, root, script, id string) brainSnapshot {
 	return snapshot
 }
 func TestSessionScripts_GlobalSwitchOnlyAffectsNewInvocation(t *testing.T) {
-	root, skills, _ := sessionScriptFixture(t)
+	root, skills, store := sessionScriptFixture(t)
 	script := filepath.Join(root, skills, "brainstorming", "scripts", "start-server.sh")
 	if err := state.SetActive(root, "X"); err != nil {
 		t.Fatal(err)
 	}
+	firstScratch := scriptScratch(t, store, "")
 	first := brainProbe(t, root, script, "")
 	if err := state.SetActive(root, "Y"); err != nil {
 		t.Fatal(err)
 	}
+	secondScratch := scriptScratch(t, store, "")
 	second := brainProbe(t, root, script, "")
-	if !strings.Contains(filepath.ToSlash(first.Dir), "/.mulix/.runtime/X/brainstorm/") || !strings.Contains(filepath.ToSlash(second.Dir), "/.mulix/.runtime/Y/brainstorm/") {
-		t.Fatalf("snapshots crossed: %+v %+v", first, second)
+	for _, item := range []struct {
+		got     brainSnapshot
+		scratch string
+	}{{first, firstScratch}, {second, secondScratch}} {
+		assertBrainScratch(t, item.got, item.scratch)
 	}
-	if !strings.Contains(filepath.ToSlash(first.Port), "/.mulix/.runtime/X/brainstorm/") || !strings.Contains(filepath.ToSlash(first.Token), "/.mulix/.runtime/X/brainstorm/") {
-		t.Fatal("first service metadata moved", first)
+	if firstScratch == secondScratch {
+		t.Fatal("global switch did not scope the next invocation")
 	}
+	boundScratch := scriptScratch(t, store, "A")
 	bound := brainProbe(t, root, script, "A")
-	if !strings.Contains(filepath.ToSlash(bound.Dir), "/.mulix/.runtime/X/brainstorm/") {
-		t.Fatal("brainstorm ignored binding", bound)
-	}
+	assertBrainScratch(t, bound, boundScratch)
 }
 func TestSessionScripts_BrainstormBadBindingCreatesNoArtifacts(t *testing.T) {
-	root, skills, _ := sessionScriptFixture(t)
+	root, skills, store := sessionScriptFixture(t)
+	scratch := scriptScratch(t, store, "A")
 	script := filepath.Join(root, skills, "brainstorming", "scripts", "start-server.sh")
 	installBrainProbe(t, script)
 	p := filepath.Join(root, ".mulix", "sessions", fmt.Sprintf("%x.json", sha256.Sum256([]byte("A"))))
@@ -261,6 +266,9 @@ func TestSessionScripts_BrainstormBadBindingCreatesNoArtifacts(t *testing.T) {
 	after := runtimeFiles(t, root)
 	if err == nil || !slices.Equal(before, after) {
 		t.Fatalf("brainstorm hid error or wrote artifacts: %v %s", err, out)
+	}
+	if _, err := os.Lstat(scratch); !os.IsNotExist(err) {
+		t.Fatalf("bad binding created scratch output: %v", err)
 	}
 }
 func TestSessionScripts_NestedRootAndSpaceInPath(t *testing.T) {
@@ -312,14 +320,12 @@ func TestVendorPatches_ResolveContextInsteadOfReadingActive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("regeneration: %v %s", err, out)
 	}
-	root, _, _ := sessionScriptFixture(t)
+	root, _, store := sessionScriptFixture(t)
 	sdd := filepath.Join(repo, "assets", "superpowers", "skills", "subagent-driven-development", "scripts", "sdd-workspace")
 	out, err = scriptCommand(context.Background(), root, "A", sdd, "docs/changes/X/tasks.md").CombinedOutput()
 	if err != nil || !strings.Contains(filepath.ToSlash(string(out)), "/.mulix/.runtime/X/sdd/tasks") {
 		t.Fatalf("regenerated workspace: %v %s", err, out)
 	}
 	brain := brainProbe(t, root, filepath.Join(repo, "assets", "superpowers", "skills", "brainstorming", "scripts", "start-server.sh"), "A")
-	if !strings.Contains(filepath.ToSlash(brain.Dir), "/.mulix/.runtime/X/brainstorm/") {
-		t.Fatal("regenerated brainstorm ignored binding", brain)
-	}
+	assertBrainScratch(t, brain, scriptScratch(t, store, "A"))
 }

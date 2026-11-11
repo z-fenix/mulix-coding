@@ -97,6 +97,33 @@ func TestContextCLI_ShowFormatsAndEmptyContext(t *testing.T) {
 	if _, err := runPresetCLI(t, "context", "show", "--json"); err != nil {
 		t.Fatal("empty context should be inspectable:", err)
 	}
+	out, err = runPresetCLI(t, "context", "show", "--field", "runtime-dir")
+	if err == nil || strings.TrimSpace(out) != "" {
+		t.Fatalf("no change produced a runtime path: %q %v", out, err)
+	}
+	out, err = runPresetCLI(t, "context", "show", "--field", "scratch-dir")
+	if err != nil || !filepath.IsAbs(strings.TrimSpace(out)) {
+		t.Fatalf("empty context scratch: %q %v", out, err)
+	}
+	if _, err := os.Lstat(strings.TrimSpace(out)); !os.IsNotExist(err) {
+		t.Fatalf("scratch query wrote files: %v", err)
+	}
+}
+
+func TestContextCLI_RelativeTempRootProducesNoPath(t *testing.T) {
+	_, _ = sessionProject(t)
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(key, "relative temporary files")
+	}
+	if filepath.IsAbs(os.TempDir()) {
+		t.Skip("host expands relative temporary roots")
+	}
+	for _, args := range [][]string{{"--field", "scratch-dir"}, {"--json"}} {
+		out, err := runPresetCLI(t, append([]string{"context", "show"}, args...)...)
+		if err == nil || strings.TrimSpace(out) != "" || !strings.Contains(err.Error(), "absolute") {
+			t.Errorf("invalid temp root produced usable CLI output: %q %v", out, err)
+		}
+	}
 }
 
 func TestContextCLI_UnbindReportsRemovalBeforeFallbackError(t *testing.T) {

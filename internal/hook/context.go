@@ -42,6 +42,12 @@ func DecideContext(root string, resolved sessionctx.Resolved, req Request) Decis
 			}
 		}
 	}
+	if resolved.State == nil && isUnder(relativeSlash(root, req.ToolInput.FilePath), layout.RuntimeDir) {
+		return Decision{Reason: "No current change owns runtime output.", Next: "Create or select a change; use mulix context show --field scratch-dir for temporary output."}
+	}
+	if d, handled := decideScratch(root, resolved, req.ToolInput.FilePath); handled {
+		return d
+	}
 	if resolved.State == nil {
 		return Decision{Allow: true}
 	}

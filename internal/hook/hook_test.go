@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/z-fenix/mulix-coding/internal/flow"
@@ -111,13 +112,13 @@ func TestDecide_DesignPhaseWritesOnlyRuntimeDesignDirs(t *testing.T) {
 
 	for _, p := range []string{
 		".mulix/.runtime/add-login/specs/2026-01-01-login-design.md",
-		".mulix/.runtime/add-login/brainstorm/123-456/content/layout.html",
 	} {
 		if d := Decide("/repo", s, req("Write", p)); !d.Allow {
 			t.Fatalf("expected %s to be writable in design, got: %+v", p, d)
 		}
 	}
 	for _, p := range []string{
+		".mulix/.runtime/add-login/brainstorm/123-456/content/layout.html",
 		".mulix/.runtime/add-login/sdd/tasks/progress.md",
 		"docs/changes/add-login/tasks.md",
 		"docs/specs/add-login/spec.md",
@@ -161,7 +162,7 @@ func TestDecide_RuntimeEvidenceDirectories(t *testing.T) {
 				t.Run(string(phase)+"/"+tool+"/"+dir, func(t *testing.T) {
 					s := flow.New("add-login", "")
 					s.Phase = phase
-					want := phase == flow.PhaseBuild || phase == flow.PhaseVerify
+					want := false
 					p := ".mulix/.runtime/add-login/" + dir + "/run-1/manifest.json"
 					if d := Decide("/repo", s, req(tool, p)); d.Allow != want {
 						t.Fatalf("%s in %s: want allow=%t, got %+v", p, phase, want, d)
@@ -182,12 +183,12 @@ func TestDecide_RuntimeEvidenceDirectories(t *testing.T) {
 	}
 }
 
-func TestDecide_SharedRuntimeDirAlwaysWritable(t *testing.T) {
+func TestDecide_SharedRuntimeDirIsNotWritable(t *testing.T) {
 	s := flow.New("add-login", "")
 	s.Phase = flow.PhaseArchive
 
-	if d := Decide("/repo", s, req("Write", ".mulix/.runtime/_shared/diagnosing-superpowers/abc/report.md")); !d.Allow {
-		t.Fatalf("expected .mulix/.runtime/_shared/ to be writable in any phase, got: %+v", d)
+	if d := Decide("/repo", s, req("Write", ".mulix/.runtime/_shared/diagnosing-superpowers/abc/report.md")); d.Allow {
+		t.Fatalf("legacy shared runtime must not be a new output destination: %+v", d)
 	}
 }
 
@@ -216,7 +217,8 @@ func TestDecide_AbsolutePathIsMadeRelativeToRoot(t *testing.T) {
 	s := flow.New("add-login", "")
 	s.Phase = flow.PhaseSpecify
 
-	d := Decide(`D:\repo`, s, req("Write", `D:\repo\docs\specs\add-login\notes.md`))
+	root := t.TempDir()
+	d := Decide(root, s, req("Write", filepath.Join(root, "docs", "specs", "add-login", "notes.md")))
 	if !d.Allow {
 		t.Fatalf("expected absolute path under spec dir to be allowed, got: %+v", d)
 	}

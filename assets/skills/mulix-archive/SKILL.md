@@ -19,9 +19,11 @@ the hook rely on discipline. This is not a sandbox or permission to route
 around the whitelist. Authorized finishing uses git/CLI commands, which
 are not gated by this hook. Commit the
 change's record before integrating: `docs/specs/<change>/`,
-`docs/changes/<change>/`, and `.mulix/.runtime/<change>/` (its state,
-design doc, and execution workspace — the visual-companion sessions are
-git-ignored).
+`docs/changes/<change>/`, and the state/design documents in
+`.mulix/.runtime/<change>/`. Keep the git-ignored `sdd/` workspace locally
+for the change's execution record; do not clean it away. Companion sessions,
+diagnostic files and ad-hoc verification output live in system scratch and
+are not part of the retained record.
 
 Only after the human has chosen — never inferred from silence — record
 it:

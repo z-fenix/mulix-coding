@@ -15,7 +15,7 @@ import (
 )
 
 func (s *Store) Resolve(ctx context.Context, req ResolveRequest) (Resolved, error) {
-	r := Resolved{Root: s.root, Source: Global, RuntimeDir: filepath.Join(s.root, filepath.FromSlash(layout.ChangeRuntimeDir(layout.Shared)))}
+	r := Resolved{Root: s.root, Source: Global}
 	if req.Identity.Present {
 		r.SessionID = req.Identity.Value
 	}
@@ -76,7 +76,8 @@ func (s *Store) Resolve(ctx context.Context, req ResolveRequest) (Resolved, erro
 		return r, &ResolveError{Kind: "binding-invalid", Err: fmt.Errorf("--change %q differs from current change %q; select it first", req.ExplicitChange, r.Change)}
 	}
 	if r.Change == "" {
-		return r, nil
+		r.ScratchDir, err = scratchDir(s.root, r.Change, r.SessionID)
+		return r, err
 	}
 	if err := ValidateChange(r.Change); err != nil {
 		return r, &ResolveError{Kind: "state-invalid", Err: err}
@@ -102,5 +103,6 @@ func (s *Store) Resolve(ctx context.Context, req ResolveRequest) (Resolved, erro
 	if err != nil {
 		return r, &ResolveError{Kind: "state-invalid", Path: state.PathFor(s.root, r.Change), Err: err}
 	}
-	return r, nil
+	r.ScratchDir, err = scratchDir(s.root, r.Change, r.SessionID)
+	return r, err
 }

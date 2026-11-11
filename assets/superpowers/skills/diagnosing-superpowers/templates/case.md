@@ -1,6 +1,6 @@
 # Case: <session-id>
 
-Workspace: .mulix/.runtime/_shared/diagnosing-superpowers/<session-id>/
+Workspace: <scratch-dir>/diagnosing-superpowers/<session-id>/
 Created: <ISO timestamp>
 
 ## Problem statement (agreed with your human partner)

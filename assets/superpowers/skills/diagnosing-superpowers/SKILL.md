@@ -29,8 +29,12 @@ Create a todo per step. Steps 5–7 run only on their stated condition.
 2. **Locate.** Resolve each session to verified absolute filesystem paths using
    `references/session-discovery.md`. Confirm a past session by quoting its
    first prompt and timestamp, and list every candidate you rejected with the
-   reason, or "none". Enumerate subagent transcripts. Create
-   `.mulix/.runtime/_shared/diagnosing-superpowers/<session-id>/`, tell your
+   reason, or "none". Enumerate subagent transcripts. First query
+   `mulix context show --field scratch-dir` from the project with the current
+   session identity; stop on an error, including an invalid binding. The query
+   works without a current change. Use its absolute path as `<scratch-dir>`,
+   create `diagnosing-superpowers/<session-id>/` there with owner-only
+   permissions (`umask 077`), tell your
    partner the path, and fill `templates/case.md` there, following its
    provenance rules for environment and skill observations.
 3. **Triage.** Read the region around the reported problem yourself. Then

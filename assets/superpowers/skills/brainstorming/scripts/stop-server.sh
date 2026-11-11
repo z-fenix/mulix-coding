@@ -3,8 +3,8 @@
 # Usage: stop-server.sh <session_dir>
 #
 # Kills the server process. Only deletes session directory if it's
-# under /tmp (ephemeral). Persistent directories (.mulix/.runtime/<change>/) are
-# kept so mockups can be reviewed later.
+# under /tmp (ephemeral). Legacy persistent directories are kept. New sessions
+# use system scratch; only /tmp sessions are deleted here.
 
 SESSION_DIR="$1"
 

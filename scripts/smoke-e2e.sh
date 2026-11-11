@@ -80,7 +80,11 @@ mulix state transition clarify-complete >/dev/null
 
 step design
 expect_hook allow ".mulix/.runtime/$c/specs/2026-01-01-greeting-design.md"
-expect_hook allow ".mulix/.runtime/$c/brainstorm/1-2/content/a.html"
+expect_hook deny ".mulix/.runtime/$c/brainstorm/1-2/content/a.html"
+scratch=$(mulix context show --field scratch-dir)
+if command -v cygpath >/dev/null 2>&1; then scratch=$(cygpath -m "$scratch"); fi
+expect_hook allow "$scratch/brainstorm/session/content/a.html"
+expect_hook deny "$scratch/verification/tests.log"
 expect_hook deny "docs/changes/$c/tasks.md"
 expect_hook deny "docs/specs/$c/spec.md"
 expect_fail mulix state transition design-approved
@@ -92,8 +96,8 @@ expect_fail mulix state transition design-approved   # not approved yet
 mulix state set design_approved true >/dev/null
 mulix state transition design-approved >/dev/null
 
-# The launcher uses this real context query; its process/env behavior is
-# exercised by TestSessionScripts_* rather than matching a source-code line.
+# Executors use runtime-dir; companion tools use scratch-dir. Their actual
+# process/env behavior is exercised by TestSessionScripts_*.
 runtime=$(mulix context show --field runtime-dir)
 case "$runtime" in *"$c") ;; *) printf 'FAIL: runtime context is %s\n' "$runtime" >&2; exit 1 ;; esac
 
@@ -124,6 +128,9 @@ mulix state transition tasks-complete >/dev/null
 step build
 expect_hook allow "src/main.go"
 expect_hook allow ".mulix/.runtime/$c/sdd/tasks/task-1-report.md"
+expect_hook allow "$scratch/verification/tests.log"
+expect_hook deny ".mulix/.runtime/$c/verification/tests.log"
+expect_hook deny ".mulix/.runtime/$c/migrations/manifest.json"
 expect_hook deny ".mulix/.runtime/$c/state.yaml"
 expect_hook deny ".mulix/.runtime/$c/specs/2026-01-01-greeting-design.md"
 scripts=.claude/skills/subagent-driven-development/scripts
@@ -185,6 +192,9 @@ mulix state transition build-complete >/dev/null
 
 step verify
 expect_hook allow "docs/changes/$c/report.md"
+expect_hook allow "$scratch/verification/full-suite.log"
+expect_hook deny ".mulix/.runtime/$c/verification/full-suite.log"
+expect_hook deny ".mulix/.runtime/$c/sdd/tasks/progress.md"
 expect_hook deny "src/main.go"
 echo "all green" > "docs/changes/$c/report.md"
 mulix state set report_path "docs/changes/$c/report.md" >/dev/null
@@ -198,7 +208,14 @@ mulix state set archive_confirmation confirmed >/dev/null
 mulix state transition archived >/dev/null
 test ! -f .mulix/active
 
-step "git hygiene"
+step "retained runtime inventory"
+while IFS= read -r dir; do
+  case "$(basename "$dir")" in specs|sdd) ;; *) printf 'FAIL: extra runtime directory %s\n' "$dir" >&2; exit 1 ;; esac
+done < <(find ".mulix/.runtime/$c" -mindepth 1 -maxdepth 1 -type d)
+
+step "legacy git hygiene"
+# Historical session keys must remain ignored even though no new launcher
+# writes this retained path. Init/update deliberately do not delete history.
 mkdir -p ".mulix/.runtime/$c/brainstorm/s1" && echo key > ".mulix/.runtime/$c/brainstorm/s1/.last-token"
 git check-ignore -q ".mulix/.runtime/$c/brainstorm/s1/.last-token"
 ! git check-ignore -q ".mulix/.runtime/$c/state.yaml"

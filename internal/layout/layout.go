@@ -15,16 +15,16 @@ const SpecsDir = "docs/specs"
 // (docs/changes/<change>/tasks.md, report.md).
 const ChangesDir = "docs/changes"
 
-// RuntimeDir holds everything mulix and its embedded superpowers skills
-// produce while a change runs: the state file, the brainstorming design
-// doc, the implementation plan, visual-companion sessions, and the
-// build's execution records. One subdirectory per change, plus Shared.
+// RuntimeDir holds each change's state, approved design documents, and
+// retained execution records. Transient material belongs in system scratch.
 const RuntimeDir = ".mulix/.runtime"
 
-// Shared is the RuntimeDir subdirectory for output that belongs to no
-// single change (the embedded skills fall back to it when no change is
-// active). It is never a change id.
+// Shared is a reserved legacy runtime name, retained for discovery and ignore
+// compatibility. New output must not use it.
 const Shared = "_shared"
+
+// ScratchPrefix reserves context-owned directories under the system temp root.
+const ScratchPrefix = "mulix-scratch-"
 
 // Context metadata is project-local, separate from change-owned runtime output.
 const (
@@ -39,17 +39,17 @@ const (
 	StateFile = "state.yaml"
 	// DesignDir holds the design doc approved in the design phase.
 	DesignDir = "specs"
-	// BrainstormDir holds visual-companion sessions (design phase). They
-	// carry a session key, so init git-ignores them.
+	// BrainstormDir holds transient visual-companion sessions in scratch.
+	// The name also remains in legacy runtime ignore rules for token safety.
 	BrainstormDir = "brainstorm"
 	// SddDir holds per-plan execution workspaces — ledger, task briefs,
 	// task reports, test logs, review packages — written by the build
 	// phase's plan executor. tasks.md is the plan, so its workspace is
 	// SddDir/tasks/ (disambiguated by a plan-path marker on collision).
 	SddDir = "sdd"
-	// VerificationDir holds verification tooling and per-run evidence.
+	// VerificationDir holds transient tooling and per-run evidence in scratch.
 	VerificationDir = "verification"
-	// MigrationsDir holds runtime artifact relocation records.
+	// MigrationsDir holds transient relocation records in scratch.
 	MigrationsDir = "migrations"
 )
 

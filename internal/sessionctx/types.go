@@ -46,6 +46,7 @@ type Resolved struct {
 	Source     Source      `json:"source"`
 	Phase      flow.Phase  `json:"phase"`
 	RuntimeDir string      `json:"runtime_dir"`
+	ScratchDir string      `json:"scratch_dir"`
 	State      *flow.State `json:"-"`
 }
 type SelectionTarget struct {

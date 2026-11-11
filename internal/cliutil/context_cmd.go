@@ -17,7 +17,7 @@ func newContextCmd() *cobra.Command {
 		if jsonOutput && field != "" {
 			return fmt.Errorf("--json and --field are mutually exclusive")
 		}
-		if field != "" && field != "runtime-dir" {
+		if field != "" && field != "runtime-dir" && field != "scratch-dir" {
 			return fmt.Errorf("unsupported context field %q", field)
 		}
 		_, r, err := resolveCommandContext(cmd, "", sessionctx.Inspect)
@@ -25,7 +25,14 @@ func newContextCmd() *cobra.Command {
 			return err
 		}
 		if field == "runtime-dir" {
+			if r.RuntimeDir == "" {
+				return fmt.Errorf("no current change; use mulix new or mulix state select <change> before creating runtime artifacts")
+			}
 			fmt.Println(r.RuntimeDir)
+			return nil
+		}
+		if field == "scratch-dir" {
+			fmt.Println(r.ScratchDir)
 			return nil
 		}
 		if jsonOutput {
@@ -37,11 +44,11 @@ func newContextCmd() *cobra.Command {
 			return nil
 		}
 		printContextSummary(r)
-		fmt.Printf("change:        %s\nphase:         %s\nruntime_dir:   %s\n", r.Change, r.Phase, r.RuntimeDir)
+		fmt.Printf("change:        %s\nphase:         %s\nruntime_dir:   %s\nscratch_dir:   %s\n", r.Change, r.Phase, r.RuntimeDir, r.ScratchDir)
 		return nil
 	}}
 	show.Flags().BoolVar(&jsonOutput, "json", false, "print stable JSON")
-	show.Flags().StringVar(&field, "field", "", "print one field (runtime-dir)")
+	show.Flags().StringVar(&field, "field", "", "print one field (runtime-dir, scratch-dir)")
 	mode := &cobra.Command{Use: "mode <legacy|session>", Args: cobra.ExactArgs(1), Short: "Set project context mode without changing bindings", RunE: func(cmd *cobra.Command, args []string) error {
 		s, err := sessionctx.Open(".")
 		if err != nil {

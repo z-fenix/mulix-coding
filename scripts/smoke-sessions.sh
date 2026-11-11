@@ -46,6 +46,17 @@ expect_hook session-A ".mulix/.runtime/$a/specs/design.md" 0
 expect_hook session-B ".mulix/.runtime/$a/specs/design.md" 2
 expect_hook session-B .mulix/context.json 2
 expect_hook session-B .mulix/sessions/other.json 2
+scratch_a=$(mulix context show --field scratch-dir --session-id session-A)
+scratch_b=$(mulix context show --field scratch-dir --session-id session-B)
+[ "$scratch_a" != "$scratch_b" ]
+if command -v cygpath >/dev/null 2>&1; then
+  scratch_a=$(cygpath -m "$scratch_a")
+  scratch_b=$(cygpath -m "$scratch_b")
+fi
+expect_hook session-A "$scratch_a/brainstorm/session/content/a.html" 0
+expect_hook session-B "$scratch_b/verification/tests.log" 0
+expect_hook session-B "$scratch_a/verification/tests.log" 2
+expect_hook session-A "$scratch_b/brainstorm/session/content/a.html" 2
 if command -v sha256sum >/dev/null 2>&1; then
   digest=$(printf session-A | sha256sum)
 else
@@ -62,8 +73,19 @@ test ! -f .mulix/active
 expect_hook session-B src/code.go 2
 expect_hook session-C src/code.go 0
 expect_hook session-C .mulix/context.json 2
-runtime=$(mulix context show --field runtime-dir --session-id session-C)
-case "$runtime" in *_shared) ;; *) printf 'FAIL: missing-current runtime: %s\n' "$runtime" >&2; exit 1 ;; esac
+mulix context show --json --session-id session-C > "$work/empty-context.json"
+grep -q '"runtime_dir":""' "$work/empty-context.json"
+if runtime=$(mulix context show --field runtime-dir --session-id session-C 2>"$work/no-runtime-error"); then
+  printf 'FAIL: missing-current query returned runtime %s\n' "$runtime" >&2; exit 1
+fi
+[ -z "$runtime" ]
+scratch=$(mulix context show --field scratch-dir --session-id session-C)
+[ -n "$scratch" ]
+test ! -e "$scratch"
+expect_hook session-C ".mulix/.runtime/$b/sdd/tasks/progress.md" 2
+if mulix context show --field scratch-dir --session-id session-B > "$work/archived-scratch" 2>&1; then
+  printf 'FAIL: archived binding produced scratch fallback\n' >&2; exit 1
+fi
 mulix context mode legacy >/dev/null
 expect_hook session-B src/code.go 0
 printf '\nPASS: session binding, dynamic fallback, invalid binding, unbind, archive, controls, legacy\n'

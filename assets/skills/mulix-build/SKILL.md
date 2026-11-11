@@ -93,6 +93,18 @@ these mulix specifics:
   list (and "Deferred minors" under inline), then advance to verify.
   Integrating the branch happens in the archive phase.
 
+## Runtime artifact policy
+
+Before creating execution artifacts, follow the
+[Runtime artifact policy](../mulix-using/SKILL.md#runtime-artifact-policy).
+The SDD workspace holds the native ledger, ownership marker, briefs, reports,
+standard task test logs and review diffs. Query `mulix context show --field
+scratch-dir` with the current identity for ad-hoc RED/rerun/debug output and
+build binaries; create its private `verification/` directory for those files.
+Keep the command, relevant failing/passing output and result in the existing
+report/ledger. Temporary files may disappear; they are not extra retained
+runtime evidence bundles.
+
 ## Advancing out of this phase
 
 ```

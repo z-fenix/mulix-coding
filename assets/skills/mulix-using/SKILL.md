@@ -30,8 +30,8 @@ specify → clarify → design → tasks → build → verify → archive
    parsing/root/active/state/output errors. In session mode, invalid bindings,
    configuration, active/state loading, or lock failures block writes when the
    project is identifiable; only a missing binding permits global fallback.
-   No current change allows ordinary writes, but session control metadata is
-   still CLI-only. An unidentifiable project root warns and allows the call.
+   No current change allows ordinary writes outside runtime, but retained runtime
+   needs an owning change and session control metadata is still CLI-only. An unidentifiable project root warns and allows the call.
    Hosts without this hook (such as DeepSeek Harness) rely on your
    discipline for all writes. This is not a filesystem security sandbox.
 2. **Guard checks** (`mulix guard <event>`, run automatically inside
@@ -66,11 +66,34 @@ Archiving retains bindings and clears global active only if it still names
 that archived change: an A→X binding with global Y stays bound to archived X,
 not Y, until explicitly repaired or unbound.
 
-For any runtime artifact, query `mulix context show --field runtime-dir`
-with the same identity. SDD and brainstorm scripts use that query themselves.
-A query error stops artifact creation; `_shared` is only for successful
-resolution with no current change. Each running tool/script keeps its startup
+For retained runtime artifacts, query `mulix context show --field runtime-dir`
+with the same identity; the SDD scripts use that query themselves. For temporary
+material, query `mulix context show --field scratch-dir`; the brainstorm launcher
+uses this query. A query error stops creation. With no current change, JSON
+inspection succeeds with an empty `runtime_dir` and a valid `scratch_dir`, while
+querying `runtime-dir` alone fails. Each running tool/script keeps its startup
 snapshot; a switch affects the next call, not an already-running process.
+
+## Runtime artifact policy
+
+- Retained change output is `.mulix/.runtime/<change>/state.yaml`, `specs/`
+  for approved design documents, and `sdd/<plan>/` for execution records.
+  The final verification report is `docs/changes/<change>/report.md`.
+- SDD uses the native files as needed: `plan-path`, `progress.md`,
+  `task-N-brief.md`, `task-N-report.md`, `task-N-tests.log`, and
+  `review-<base>..<head>.diff`, plus `sdd/.gitignore`. Keep the workspace
+  for guards and recovery; keep existing progress formats and RED/GREEN evidence.
+- Temporary companion files go under `<scratch-dir>/brainstorm/` in design;
+  ad-hoc RED/rerun logs, build binaries and verification or migration material
+  go under `<scratch-dir>/verification/` or `migrations/` in build/verify.
+  Diagnostics use `<scratch-dir>/diagnosing-superpowers/` in any phase.
+  Resolve the absolute scratch path first with the current identity, create
+  private directories, and retain necessary command/output summaries in the
+  existing task report, ledger or final report rather than more evidence files.
+- A valid no-change context still has scratch for standalone companion/diagnosis;
+  retained SDD work needs a selected change. Legacy `brainstorm/`, `verification/`,
+  `migrations/` and `_shared/` inside runtime are history, not new destinations.
+  Init/update preserve those files and their sensitive-file ignore rules.
 
 ## Before doing anything else
 
@@ -88,8 +111,8 @@ phase.
 `mulix init` installs every superpowers skill as a project skill in
 `{{SKILLS_DIR}}/` (unprefixed: `brainstorming`, not
 `superpowers:brainstorming`). They keep their full discipline; mulix
-only moves their artifacts under `.mulix/.runtime/` and replaces their
-hand-offs with phase gates:
+places retained artifacts under `.mulix/.runtime/`, transient material in
+context-scoped system scratch, and replaces their hand-offs with phase gates:
 
 - The phase skill decides when one runs. brainstorming ends at the
   design gate, writing-plans at the tasks gate (no execution handoff),
@@ -99,8 +122,9 @@ hand-offs with phase gates:
   `verification-before-completion` before any "done/fixed/passing" claim,
   `receiving-code-review` when review feedback arrives,
   `dispatching-parallel-agents` for independent investigations.
-- Outside a mulix change (no active change), they behave as upstream,
-  with output under `.mulix/.runtime/_shared/`.
+- Outside a mulix change, companion/diagnostic tools use the valid no-change
+  scratch context. Plan executors need a selected change for retained SDD
+  records; an empty or invalid runtime query never creates shared output.
 
 ## Starting a new change
 

@@ -14,7 +14,8 @@ and **DeepSeek Harness**. It borrows from four existing projects:
   workflow (brainstorming, writing-plans, test-driven-development,
   subagent-driven-development / executing-plans,
   verification-before-completion, finishing-a-development-branch), with
-  its artifacts under `.mulix/.runtime/`.
+  retained artifacts under `.mulix/.runtime/` and transient output in
+  context-scoped system scratch.
 - **caveman** — the discipline of writing `SKILL.md` `description` fields
   as trigger conditions only (never a process summary, so the model can't
   use the summary as an excuse to skip loading the real content).
@@ -49,17 +50,23 @@ A change's files live in three places: `docs/specs/<change>/` holds the
 requirements doc, meant to stay a useful reference long after the
 change is archived; `docs/changes/<change>/` holds the plan (`tasks.md`)
 and the verification report; `.mulix/.runtime/<change>/` holds
-everything produced while the change runs — its state (`state.yaml`),
-the approved design doc, visual-companion sessions (git-ignored: they
-carry a session key), and the build's execution workspace (ledger, task
-briefs, task reports with RED/GREEN evidence, test logs, review
-packages). Build and verify may also write `verification/` (tooling and
-per-run evidence) and `migrations/` (runtime relocation manifests) under
-the active change's runtime directory. These permissions do not allow
-writes to another change, the CLI-owned `state.yaml`, or an archived
-change. The final report stays under `docs/changes/<change>/report.md`.
-`.mulix/.runtime/_shared/` catches output from the embedded
-skills when no change is active.
+everything retained while the change runs — its state (`state.yaml`),
+the approved design doc in `specs/`, and the native execution workspace in
+`sdd/<plan>/`. SDD keeps `plan-path`, `progress.md`, task briefs/reports,
+`task-N-tests.log`, review-range diffs, and its own `.gitignore`, as needed by
+the executor. These records support recovery and build guards; they are not
+removed at the end of execution.
+
+The only new per-change runtime directories are **`specs/` and `sdd/`**.
+Visual-companion sessions, diagnostic material, ad-hoc RED/rerun logs,
+verification tooling, relocation manifests and build binaries use private,
+context-scoped system scratch instead. Necessary command/output summaries
+stay in the existing ledger, task reports, or the final report at
+`docs/changes/<change>/report.md`. Runtime permissions still exclude another
+change, the CLI-owned `state.yaml`, and archived changes. Historical
+`brainstorm/`, `verification/`, `migrations/`, and `_shared/` data is preserved,
+not silently cleaned by init/update; legacy ignore rules continue to protect
+old session keys.
 
 New changes use a local-calendar-date ID, for example
 `2026-10-14-add-login`. The spec, change, and runtime directories share
@@ -77,7 +84,10 @@ Two mechanisms provide workflow control from that state:
    evidence.
 2. **The PreToolUse hook** (`mulix hook`) checks Claude Code's
    `Write`/`Edit` calls against the phase whitelist, including runtime
-   subdirectories (design: `specs/`, `brainstorm/`; build: `sdd/`). Raw
+   subdirectories (design: `specs/`; build: `sdd/`). Transient output is
+   scoped to the resolved scratch directory: design writes `brainstorm/`,
+   build/verify write `verification/` or `migrations/`, and diagnostics use
+   `diagnosing-superpowers/` in any phase. Raw
    `state.yaml` edits are denied through these tools, not through every
    possible writer.
 
@@ -90,8 +100,8 @@ request parsing, root discovery, active/state loading, and output errors.
 **Session mode** blocks invalid bindings, configuration, active/state loading,
 and lock errors when the project is identifiable; missing bindings alone
 fall back to global active. An unidentifiable project root still warns and
-allows the call. No current change allows ordinary writes, while session-mode
-control metadata stays CLI-only. DeepSeek Harness has no equivalent hook:
+allows the call. No current change allows ordinary writes outside runtime, but retained runtime requires an
+owning change and session-mode control metadata stays CLI-only. DeepSeek Harness has no equivalent hook:
 agents follow phase discipline, while CLI transitions run guards.
 
 Guards check the **structure of recorded evidence**, not whether a human
@@ -136,8 +146,16 @@ mulix context unbind --session-id session-A
 
 Archiving keeps session bindings and only clears global active if it still
 points to the archived change. An already-running script keeps its startup
-context. SDD and brainstorm scripts query `mulix context show --field
-runtime-dir`; a failed query stops them rather than writing into `_shared`.
+context. SDD scripts query `mulix context show --field runtime-dir`; companion
+scripts query `mulix context show --field scratch-dir`. Failed resolution stops
+creation rather than falling back. Both queries use the current identity.
+
+`context show --json` includes an absolute `scratch_dir`, derived from the
+project, change and session without creating files. It remains available for
+a valid no-change context, whose `runtime_dir` is empty. Querying `runtime-dir`
+alone without a current change fails; create/select a change before running a
+plan. Scratch directories are private, temporary and not archived; do not use
+one context's scratch as another context's output path.
 
 Context files, hashed-ID binding files, and persistent lock files live under
 `.mulix/context.json`, `.mulix/sessions/`, and `.mulix/.locks/`, ignored by local
@@ -177,8 +195,9 @@ compete with the phase gates.
 
 `scripts/sync-superpowers.sh <superpowers-dir>` regenerates the vendored
 copy. It rewrites `superpowers:<skill>` references to the unprefixed
-names, moves every artifact location under `.mulix/.runtime/` (the
-scripts resolve the effective change through `mulix context show`), and applies a small set
+names, moves retained design/SDD output under `.mulix/.runtime/`, directs
+transient companion/diagnosis material to system scratch (the scripts resolve
+paths through `mulix context show`), and applies a small set
 of exact patches — brainstorming's terminal states give way to mulix's
 design gate, writing-plans writes `docs/changes/<change>/tasks.md` with
 `## Task N` headings and no execution handoff, the executors keep their

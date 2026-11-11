@@ -46,14 +46,17 @@ new track), never the reverse.
 ## Where things go
 
 - Design doc: `.mulix/.runtime/<change>/specs/` (architectural only).
-- Visual companion: pass the project root as `--project-dir`; sessions
-  land in `.mulix/.runtime/<change>/brainstorm/` (git-ignored).
-- Keep all agent-authored output in those paths. Claude Code's hook
-  checks `Write`/`Edit`, not Bash, MCP, NotebookEdit or other writers;
-  missing paths and hook errors fail open (see `mulix-using`). Other hosts
-  rely on discipline. Uncovered writes are not permission to edit the
-  spec, tasks or source here. If the design shows the spec itself is
-  wrong, stop and tell the human; changing requirements is their call.
+- Visual companion: pass the project root as `--project-dir`; the launcher
+  queries `mulix context show --field scratch-dir` and puts private sessions in
+  its `brainstorm/` directory. Save the returned screen/state paths; these are
+  temporary materials, not archived runtime output.
+- Keep agent-authored design documents and companion files in their respective
+  paths. Claude Code's hook checks `Write`/`Edit`, with mode-specific error
+  handling described in `mulix-using`; Bash, MCP and other writers are not
+  automatically gated. Other hosts rely on discipline. Uncovered writes are
+  not permission to edit the spec, tasks or source here. If the design shows
+  the spec itself is wrong, stop and tell the human; changing requirements
+  is their call.
 
 ## Ending the phase
 

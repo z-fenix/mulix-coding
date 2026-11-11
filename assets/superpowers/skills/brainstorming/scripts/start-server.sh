@@ -6,7 +6,7 @@
 # Each session gets its own directory to avoid conflicts.
 #
 # Options:
-#   --project-dir <path>  Store session files under <path>/.mulix/.runtime/<change>/brainstorm/
+#   --project-dir <path>  Resolve context from <path>; store session files in system scratch
 #                         instead of /tmp. Files persist after server stops.
 #   --host <bind-host>    Host/interface to bind (default: 127.0.0.1).
 #                         Use 0.0.0.0 in remote/containerized environments.
@@ -110,22 +110,50 @@ fi
 # keep everything this script and the server create owner-only.
 umask 077
 
-# Generate unique session directory
-BRAINSTORM_INSTANCE_ID="$$-$(date +%s)"
+# Reuse only private, non-symlink directories: umask alone cannot secure
+# an existing directory in a shared system temp root.
+private_dir() {
+  local dir=$1
+  if [[ -L "$dir" || ( -e "$dir" && ! -d "$dir" ) ]]; then
+    printf 'refusing unsafe scratch directory: %s\n' "$dir" >&2
+    return 1
+  fi
+  if [[ ! -d "$dir" ]]; then
+    mkdir -m 700 "$dir" 2>/dev/null || [[ -d "$dir" && ! -L "$dir" ]] || return 1
+  fi
+  if [[ -L "$dir" || ! -O "$dir" ]]; then
+    printf 'scratch directory is not owned by the current user: %s\n' "$dir" >&2
+    return 1
+  fi
+  chmod 700 "$dir" || return 1
+}
+
+require_absolute_scratch() {
+  case "$1" in
+    /*|[a-zA-Z]:/*) return 0 ;;
+  esac
+  printf 'scratch directory must be absolute: %s\n' "$1" >&2
+  return 1
+}
 
 if [[ -n "$PROJECT_DIR" ]]; then
-  # mulix: resolve one context snapshot; errors must not become shared output.
-  RUNTIME_DIR="$(cd "$PROJECT_DIR" && mulix context show --field runtime-dir)" || exit 1
+  # One successful context snapshot; errors never become shared output.
+  SCRATCH_DIR="$(cd "$PROJECT_DIR" && mulix context show --field scratch-dir)" || exit 1
+  [[ -n "$SCRATCH_DIR" ]] || { printf 'empty scratch directory\n' >&2; exit 1; }
   if command -v cygpath >/dev/null 2>&1; then
-    RUNTIME_DIR="$(cygpath -m "$RUNTIME_DIR")" || exit 1
+    SCRATCH_DIR="$(cygpath -m "$SCRATCH_DIR")" || exit 1
   fi
-  SESSION_DIR="${RUNTIME_DIR}/brainstorm/${BRAINSTORM_INSTANCE_ID}"
-  # Persist the bound port and key per project so a restart reuses them and an
-  # already-open browser tab reconnects to the same URL with a valid cookie.
-  export BRAINSTORM_PORT_FILE="${RUNTIME_DIR}/brainstorm/.last-port"
-  export BRAINSTORM_TOKEN_FILE="${RUNTIME_DIR}/brainstorm/.last-token"
+  require_absolute_scratch "$SCRATCH_DIR" || exit 1
+  private_dir "$SCRATCH_DIR" || exit 1
+  private_dir "$SCRATCH_DIR/brainstorm" || exit 1
+  SESSION_DIR="$(mktemp -d "$SCRATCH_DIR/brainstorm/session.XXXXXX")" || exit 1
+  # Reuse the port and key only within this project/change/session context.
+  export BRAINSTORM_PORT_FILE="$SCRATCH_DIR/brainstorm/.last-port"
+  export BRAINSTORM_TOKEN_FILE="$SCRATCH_DIR/brainstorm/.last-token"
 else
-  SESSION_DIR="/tmp/brainstorm-${BRAINSTORM_INSTANCE_ID}"
+  TEMP_ROOT="${TMPDIR:-/tmp}"
+  require_absolute_scratch "$TEMP_ROOT" || exit 1
+  SESSION_DIR="$(mktemp -d "$TEMP_ROOT/mulix-brainstorm.XXXXXX")" || exit 1
 fi
 
 STATE_DIR="${SESSION_DIR}/state"

@@ -1,6 +1,6 @@
 # Session diagnosis: <session-id>
 
-Report path: .mulix/.runtime/_shared/diagnosing-superpowers/<session-id>/report.md
+Report path: <scratch-dir>/diagnosing-superpowers/<session-id>/report.md
 Written: <ISO timestamp>
 
 ## 1. Problem statement (REQUIRED)
