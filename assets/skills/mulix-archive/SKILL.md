@@ -5,6 +5,15 @@ description: Use when the active change is in the archive phase, after verificat
 
 # Archive phase
 
+Where the actual project constitution requires the project-scoped formal
+workbench supplement from `mulix-verify`, read the verified report and rerun
+its read-only evidence check against the same contract, results and
+independently verified deployed revision before finishing/integration.
+Missing formal evidence, drift or unresolved blockers stop integration; do
+not author missing evidence in archive. The helper checks integrity, not
+human consent or business truth, and does not replace the current native
+verification receipt or the explicit human integration decision below.
+
 **REQUIRED SUB-SKILL:** invoke `finishing-a-development-branch` and
 follow it: verify the suite is green, detect the environment, present
 its menu exactly as written (merge locally / push and open a PR / keep

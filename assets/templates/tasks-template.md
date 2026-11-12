@@ -29,6 +29,16 @@ exact values copied verbatim from the spec, plus any MUST principle from
 `.mulix/memory/constitution.md` that binds this change. Every task's
 requirements implicitly include this section.]
 
+## Acceptance & Release Gates
+
+- 继承规格的验收基线、范围和阻断项；列出每个业务闭环的验收承接 Task，不把全部取证推迟到最后一步。
+- **实现状态与验收状态分列**：Task complete 只表示其批准交付层级完成；正式验收仍使用 NOT_RUN / PARTIAL / PASS / FAIL / BLOCKED / SKIPPED_BY_USER，不把跳过或候选算通过。
+- 纯模型/Mock 只证明限定契约；持久化、事务、并发、生产装配与业务旅程分别使用能证明该行为的真实设施。基础任务可由下游集成任务承接正式验收，但须明确 Task 与门禁。
+- 正式用例正文和受审检查点清单是分母；FR/SC → 正式 case/checkpoint → feature/人工步骤 → 原始执行证据必须可追踪，不以标题关联代替覆盖。
+- 保留原生 mulix-acceptance / mulix-tests / quality.yaml 和 CLI 真实运行回执；项目宪法要求外部正式工作台时，另先审核 acceptance-contract.json、真实执行并生成 acceptance-results.json，运行 verify 技能的附加证据校验。工具自测、dry-run 和报告导出不是业务验收。
+- 明确真实测试环境、受控写入授权和工作台产物 producer；缺环境/契约/准入保持 BLOCKED，不造固定结果或默认成功数据。
+- 提交步骤仅在用户授权且实际提交成功后勾选；本模板不自动授权 commit/push/部署或更改其他变更状态。
+
 ## Review Focus
 
 [The five input classes or failure modes the spec implies but no task's
@@ -81,6 +91,17 @@ error or missing command is not a behavioral RED. Commit only when authorized.
 **Interfaces:**
 - Consumes: [what this task uses from earlier tasks — exact signatures]
 - Produces: [what later tasks rely on — exact names, parameter and return types]
+
+**Acceptance Contract:**
+- Requirement / rule / success criterion: [精确 ID]
+- Delivery level: [纯内核 / 持久化集成 / 生产装配 / 业务闭环；与本任务批准范围一致]
+- Formal case / checkpoint: [原始 ID；缺口或候选保持显式阻断；基础任务写明下游验收承接 Task；无外部工作台时承接原生 AC/TC]
+- Given / When / Then: [真实初态、动作、状态/金额/数量/关联/事件及禁止副作用；预期来自产品或批准裁定]
+- Facilities and doubles: [真实设施、受控数据与写入授权、替身边界；不以替身调用证明事务/并发]
+- Evidence boundary: [本任务能证明什么 / 不能证明什么；实际 producer、执行命令及原始证据位置]
+- Downstream gate: [接口可消费条件、生产启用条件、验收承接 Task 和未闭合门禁]
+- Implementation status: NOT_STARTED
+- Acceptance status: NOT_RUN
 
 - [ ] **Step 1: Write the failing test**
 

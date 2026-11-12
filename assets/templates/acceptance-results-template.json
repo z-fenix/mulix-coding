@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "change": "[CHANGE_ID]",
+  "contract_sha256": "",
+  "implementation_revision": "[VERIFIED_IMMUTABLE_IMPLEMENTATION_REVISION]",
+  "environment": "[AUTHORIZED_TEST_ENVIRONMENT_ID]",
+  "executed_at": "",
+  "scope_approval": { "path": "../test/traceability/[CONTRACT_SCOPE_REVIEW].json", "sha256": "" },
+  "blockers": ["NOT_RUN: 模板不是运行结果，不预填通过、运行号或证据"],
+  "cases": [
+    {
+      "id": "[EXISTING_FORMAL_CASE_ID]",
+      "checkpoints": [
+        {
+          "id": "[REVIEWED_CHECKPOINT_ID]",
+          "status": "NOT_RUN",
+          "actual": "",
+          "run_id": null,
+          "evidence": { "path": "", "sha256": "" }
+        }
+      ]
+    }
+  ]
+}

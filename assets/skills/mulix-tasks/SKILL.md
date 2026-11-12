@@ -32,6 +32,13 @@ mulix specifics:
 - **Task headings:** `## Task N: <name>`, N = 1, 2, 3... in execution
   order, no gaps, each exactly once. The build executors extract briefs by
   this heading, and the guards match ledger lines and reports to it.
+- **Acceptance contract:** include the template's per-task requirement IDs,
+  delivery level, original formal case/checkpoint IDs or explicit gaps,
+  Given/When/Then including forbidden effects, real facilities and doubles,
+  proof boundaries, downstream owner/gates, and separate implementation and
+  acceptance statuses. For a foundation task, name the integration task that
+  owns full business proof; a kernel GREEN does not close that obligation.
+  Carry the spec's full acceptance scope and blockers into the global gates.
 - **Steps:** code tasks use RED → verify RED → GREEN → verify GREEN with
   `mulix test run --task N --stage red|green`, and commit only if authorized.
   Verification/documentation tasks declare a concrete reason and run a real

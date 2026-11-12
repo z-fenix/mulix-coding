@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "change": "[CHANGE_ID]",
+  "acceptance_level": "FORMAL",
+  "baseline": {
+    "implementation_revision": "[VERIFIED_IMMUTABLE_IMPLEMENTATION_REVISION]",
+    "environment": "[AUTHORIZED_TEST_ENVIRONMENT_ID]",
+    "spec": { "path": "docs/specs/[CHANGE_ID]/spec.md", "sha256": "" },
+    "product": { "path": "../pm/Product-Spec.md", "sha256": "" },
+    "formal_cases": { "path": "../test/完整测试点与测试用例.md", "sha256": "" }
+  },
+  "case_sources": [
+    { "path": "../test/requirements/case/[MODULE]/cases.json", "sha256": "" }
+  ],
+  "requirements": [
+    { "id": "[FR_OR_SC_ID]", "case_ids": ["[EXISTING_FORMAL_CASE_ID]"] }
+  ],
+  "exclusions": [],
+  "blocking_items": ["TEMPLATE_NOT_REVIEWED: 补齐来源、检查点与范围确认前保持阻断"],
+  "cases": [
+    {
+      "id": "[EXISTING_FORMAL_CASE_ID]",
+      "coverage": "PARTIAL",
+      "remaining": ["待按正式用例前置、步骤、全部预期完成检查点审阅"],
+      "context": { "path": "../test/fixtures/[FROZEN_CASE_CONTEXT].json", "sha256": "" },
+      "checkpoints": [
+        {
+          "id": "[REVIEWED_CHECKPOINT_ID]",
+          "expected": "[OBSERVABLE_EXPECTED_RESULT_AND_FORBIDDEN_SIDE_EFFECTS]",
+          "method": "AUTOMATED",
+          "feature": "requirements/case/[MODULE]/[FEATURE].feature",
+          "scenario": "[EXACT_REVIEWED_SCENARIO_NAME]"
+        }
+      ]
+    }
+  ]
+}

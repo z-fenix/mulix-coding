@@ -55,6 +55,16 @@
 
 - ...
 
+## Acceptance Authority & Evidence *(must be filled before first change)*
+
+- **Authority**: [产品与正式用例的真实来源、候选准入规则、范围确认者；保留原始 ID]
+- **Evidence levels**: [内核/集成/生产装配/正式业务验收分别能证明什么；任务完成不自动升级验收层级]
+- **Pass conditions**: [全部范围内正式检查点实际通过、基线匹配、原始证据可定位；部分/跳过/未执行/阻断不能算通过]
+- **Enforcement**: [规格/任务的验收契约、可执行证据校验命令、最终报告与人工放行职责；机器校验不认证人类同意或执行真实性]
+- **Scope amendments**: [范围调整的明确批准、影响说明与重新取证；不得为获取绿色结果缩减分母]
+
+项目实际宪法已有这些规则时保留其权威，不用本模板覆盖，也不复制架构/编码规则形成第二真相源。
+
 ## Governance
 <!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
