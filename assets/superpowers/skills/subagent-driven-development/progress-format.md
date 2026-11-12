@@ -58,6 +58,17 @@ report or log, not a giant ledger paragraph. Give headings and tables a
 blank line on either side. Each execution constraint or pre-flight note
 is a separate item/row, not multiple events on one prose line.
 
+## Runner evidence in mulix projects
+
+When tasks.md declares `mulix-tests`, completion markers and prose are structural
+records, not test receipts. Follow mulix-build: run `mulix test run --task N
+--stage red`, implement, then `--stage green`; reasoned non-code tasks use
+`--stage check`. The CLI appends summaries to existing task reports and owns
+source-bound receipts in state.yaml. Preserve those summaries when adding review
+or implementation notes. `task-done` can invoke the appropriate GREEN/CHECK
+command, but never manufactures prior RED evidence. Final `mulix verify` runs
+all project-configured mandatory suites before normal delivery.
+
 ## Resume and historical compatibility
 
 List completion markers and legacy plain `Task N: complete ...` lines

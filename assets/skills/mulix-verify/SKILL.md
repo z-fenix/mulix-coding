@@ -1,63 +1,62 @@
 ---
 name: mulix-verify
-description: Use when the active change is in the verify phase, to run the project's build/test commands and record the outcome before archiving.
+description: Use when the active change is in the verify phase, or archive evidence is stale before archiving.
 ---
 
 # Verify phase
 
-**REQUIRED SUB-SKILL:** `verification-before-completion` governs every
-claim this phase records.
+**REQUIRED SUB-SKILL:** `verification-before-completion` governs claims.
 
-Run the project's actual build and test commands — the whole suite, not
-just the tests written during build. Then check what got built against
-`spec.md`'s requirements and success criteria and the approved design
-(`design_path`, or the in-chat design for a bounded change), not just
-the ledger: a completion line is a claim, this phase checks the claim.
-Read the build's "Rulings I made" and deferred minors from the ledger at
-`.mulix/.runtime/<change>/sdd/tasks/progress.md` and say, for each
-ruling, whether it holds up against the spec.
+1. Review each AC/TC against the spec and approved design, including boundaries,
+   errors and integration behavior. Read the build's rulings and deferred minors
+   in `.mulix/.runtime/<change>/sdd/tasks/progress.md`; record whether each ruling
+   holds against the spec in `docs/changes/<change>/report.md`.
+2. Obtain a whole-change review and address blocking findings. Retain the actual
+   review reference and outcome in the report using exactly one fence:
 
-Write the commands, their output summary, the requirement-by-requirement
-check, and the rulings review to `docs/changes/<change>/report.md`, and
-record the result honestly:
+   ```mulix-review
+   reviewer: actual reviewer identity or review session reference
+   result: approved
+   blocking: []
+   ```
 
-```
-mulix state set report_path docs/changes/<change>/report.md
-mulix state set verify_result pass    # or: fail
-```
+   This is an explicit local claim, not authenticated reviewer consent. Only
+   record approved/no blockers when that review actually happened.
+3. Inspect `.mulix/quality.yaml` against the project's real test surface. Every
+   required unit, integration and final-artifact suite must be declared. Read
+   `.mulix/templates/quality-template.md` for adapters and limitations. Run:
 
-## Temporary output
+   ```sh
+   mulix verify
+   ```
 
-Query `mulix context show --field scratch-dir` with the current session identity
-and use its private `verification/` directory for full command output, scratch
-tools and build binaries. The retained result is the command/output summary and
-requirement check in `docs/changes/<change>/report.md`; copy the relevant evidence
-there rather than relying on a temporary file as the only record. Existing SDD
-records stay read-only in this phase. See the
-[Runtime artifact policy](../mulix-using/SKILL.md#runtime-artifact-policy).
+   The CLI executes all configured suites, checks exact mapped cases, records
+   pass/fail itself, and appends summaries to the existing report. Missing,
+   all-skipped or malformed results fail closed. Review any unmapped skips and
+   undeclared/manual checks explicitly; do not represent a skip as acceptance.
+4. On success, `mulix state transition verify-pass`. This enters archive with
+   `archive_confirmation=pending`; integration still needs an explicit human
+   decision. On failure, explain which tasks own it, then
+   `mulix state transition verify-fail` to return to build. Fix with real task
+   execution evidence; append rather than erase ledger history. Report repeated
+   failures instead of silently looping.
 
-## If it passes
+Manual `verify_result=pass`, old logs and handwritten RED/GREEN are not test
+receipts. A failed/incomplete retry invalidates prior success. Source, tests,
+policy, spec, plan definitions, Git revision or final-report edits stale the
+final evidence. Verified step-checkbox status changes are normalized.
 
-```
-mulix state transition verify-pass
-```
+## Temporary output and revalidation
 
-This sets `archive_confirmation=pending` — the archive phase requires an
-explicit human decision before anything is integrated.
+The runner keeps bounded stdout/stderr in the current context's system scratch
+`verification/` directory (`mulix context show --field scratch-dir`) and retains
+stream hashes, counts and test identities in state.yaml. Keep relevant behavior
+and requirement checks in the final report. Existing SDD records stay read-only
+in verify; see the [runtime artifact policy](../mulix-using/SKILL.md#runtime-artifact-policy).
 
-## If it fails
-
-```
-mulix state transition verify-fail
-```
-
-This sends the change back to build and increments the failure counter.
-Say in report.md which tasks the failure traces to. Back in build, fix
-through the executor's own loop (a failing test first, then the fix, and
-a ledger line for it) — the existing `Task N: complete` lines stay; the
-fix adds to the record rather than rewriting it. Report the failure to
-the human once `verify_failures` climbs past a couple of rounds — don't
-keep looping silently.
-
-Never set `verify_result=pass` because you expect the tests would pass,
-or because you already fixed what you assume was wrong. Run them.
+If finishing changes inputs after verify-pass, `mulix verify` can revalidate in
+not-yet-archived archive phase, without changing phases or bypassing readiness.
+Correct a failing implementation in build using `mulix state transition
+verify-fail` after failed archive revalidation, not through archive-phase writers.
+An already archived change cannot run tests or mutate evidence through this
+command. Recovery `--force --reason` logs a bypass, not release qualification.

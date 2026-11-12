@@ -4,39 +4,14 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-)
 
-// taskHeadingRe matches a task section heading: "## Task 3: Parser" (any
-// heading level from ## down, matching how the build executors' task-brief
-// extraction finds a task). Text inside fenced code blocks is excluded by
-// the caller, so example plans quoted in a task don't count.
-var taskHeadingRe = regexp.MustCompile(`^#{2,}[ \t]+Task[ \t]+([0-9]+)([^0-9]|$)`)
+	"github.com/z-fenix/mulix-coding/internal/quality"
+)
 
 // TaskNumbers returns the numbers of every "## Task N" heading in a
 // tasks.md, in document order, ignoring headings inside ``` fences.
 func TaskNumbers(tasksMD string) []int {
-	var out []int
-	inFence := false
-	for line := range strings.SplitSeq(tasksMD, "\n") {
-		line = strings.TrimRight(line, "\r")
-		if strings.HasPrefix(line, "```") {
-			inFence = !inFence
-			continue
-		}
-		if inFence {
-			continue
-		}
-		m := taskHeadingRe.FindStringSubmatch(line)
-		if m == nil {
-			continue
-		}
-		n, err := strconv.Atoi(m[1])
-		if err != nil {
-			continue
-		}
-		out = append(out, n)
-	}
-	return out
+	return quality.TaskNumbers(tasksMD)
 }
 
 // ledgerCompleteRe matches a list item or legacy plain completion line:

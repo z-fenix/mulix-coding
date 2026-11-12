@@ -58,19 +58,22 @@ type checkFunc func(root string, s flow.State) Result
 // checksByName supplies the implementations; flow.Table alone decides
 // which checks a transition needs and in what order.
 var checksByName = map[string]checkFunc{
-	"spec-artifact-present":       checkArtifactPresent("spec-artifact-present", func(s flow.State) string { return s.SpecPath }),
-	"clarify-recorded":            checkClarifyRecorded,
-	"clarify-skip-acknowledged":   checkClarifySkipAcknowledged,
-	"design-approved":             checkDesignApproved,
-	"tasks-artifact-present":      checkTasksInChangeDir,
-	"tasks-have-task-sections":    checkTasksHaveSections,
-	"execution-method-chosen":     checkExecutionMethodChosen,
-	"plan-tasks-complete":         checkPlanTasksComplete,
-	"tdd-evidence-present":        checkTddEvidencePresent,
-	"verification-report-present": checkArtifactPresent("verification-report-present", func(s flow.State) string { return s.ReportPath }),
-	"verify-result-pass":          checkVerifyResultPass,
-	"verification-failed":         checkVerifyResultFail,
-	"archive-confirmed":           checkArchiveConfirmed,
+	"spec-artifact-present":         checkArtifactPresent("spec-artifact-present", func(s flow.State) string { return s.SpecPath }),
+	"clarify-recorded":              checkClarifyRecorded,
+	"clarify-skip-acknowledged":     checkClarifySkipAcknowledged,
+	"design-approved":               checkDesignApproved,
+	"tasks-artifact-present":        checkTasksInChangeDir,
+	"tasks-have-task-sections":      checkTasksHaveSections,
+	"execution-method-chosen":       checkExecutionMethodChosen,
+	"plan-tasks-complete":           checkPlanTasksComplete,
+	"tdd-evidence-present":          checkTddEvidencePresent,
+	"verification-report-present":   checkArtifactPresent("verification-report-present", func(s flow.State) string { return s.ReportPath }),
+	"verify-result-pass":            checkVerifyResultPass,
+	"verification-failed":           checkVerifyResultFail,
+	"archive-confirmed":             checkArchiveConfirmed,
+	"acceptance-criteria-present":   checkAcceptanceCriteria,
+	"acceptance-matrix-complete":    checkAcceptanceMatrix,
+	"verification-evidence-current": checkVerificationEvidence,
 }
 
 // Run executes the legal transition's declared checks. Illegal events and
@@ -267,77 +270,10 @@ func checkPlanTasksComplete(root string, s flow.State) Result {
 	return Result{Name: name, Pass: true}
 }
 
-// checkTddEvidencePresent verifies every task left a TDD trace: a
-// task-N-report.md in the plan's workspace carrying both a RED entry (the
-// failing run, before implementation) and a GREEN entry (the passing run
-// after). Both executors write it — the subagent-driven implementer by its
-// report contract, the inline executor per the mulix-build skill.
+// checkTddEvidencePresent requires runner-owned RED/GREEN receipts for code,
+// or a reasoned CHECK receipt for a non-code task. Report prose is not evidence.
 func checkTddEvidencePresent(root string, s flow.State) Result {
-	const name = "tdd-evidence-present"
-	tasks, ws, res := loadPlanAndWorkspace(root, s, name)
-	if !res.Pass {
-		return res
-	}
-	var missing []string
-	for _, n := range tasks {
-		report := filepath.Join(ws, fmt.Sprintf("task-%d-report.md", n))
-		data, err := os.ReadFile(report)
-		if err != nil {
-			missing = append(missing, fmt.Sprintf("Task %d (no report)", n))
-			continue
-		}
-		if problem := tddEvidenceProblem(string(data)); problem != "" {
-			missing = append(missing, fmt.Sprintf("Task %d (%s)", n, problem))
-		}
-	}
-	if len(missing) > 0 {
-		return Result{Name: name, Pass: false, Next: fmt.Sprintf("%d task(s) lack TDD evidence in %s/task-N-report.md, e.g. %s. Each report needs a \"RED:\" line (failing command and output before implementing) and a \"GREEN:\" line (passing command and output after).", len(missing), slashRel(root, ws), missing[0])}
-	}
-	return Result{Name: name, Pass: true}
-}
-
-// tddEvidenceProblem returns "" when report records both TDD phases: a
-// line whose text (after list/emphasis markers) starts with "RED" and one
-// that starts with "GREEN", each followed by content.
-func tddEvidenceProblem(report string) string {
-	var red, green bool
-	for line := range strings.SplitSeq(report, "\n") {
-		t := strings.TrimLeft(strings.TrimSpace(line), "-*# ")
-		t = strings.TrimLeft(t, "*_")
-		switch {
-		case hasPhase(t, "RED"):
-			red = true
-		case hasPhase(t, "GREEN"):
-			green = true
-		}
-	}
-	switch {
-	case !red && !green:
-		return "no RED/GREEN evidence"
-	case !red:
-		return "no RED evidence"
-	case !green:
-		return "no GREEN evidence"
-	}
-	return ""
-}
-
-// hasPhase reports whether t is "<PHASE>" followed by a separator and some
-// content, e.g. "RED: go test ./... → FAIL ...".
-func hasPhase(t, phase string) bool {
-	rest, ok := strings.CutPrefix(t, phase)
-	if !ok {
-		return false
-	}
-	rest = strings.TrimLeft(rest, "*_ ")
-	rest, ok = strings.CutPrefix(rest, ":")
-	if !ok {
-		rest, ok = strings.CutPrefix(rest, "—")
-	}
-	if !ok {
-		rest, ok = strings.CutPrefix(rest, "-")
-	}
-	return ok && strings.TrimSpace(strings.TrimLeft(rest, "*_")) != ""
+	return checkTaskExecutionEvidence(root, s)
 }
 
 // loadPlanAndWorkspace reads tasks.md's task numbers and locates its

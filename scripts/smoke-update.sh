@@ -3,6 +3,15 @@
 # Usage: bash scripts/smoke-update.sh [path-to-mulix-binary]
 set -euo pipefail
 [ -n "${SMOKE_TRACE:-}" ] && set -x
+# Use an available Python 3 interpreter without modifying the caller's PATH.
+python_bin=${PYTHON:-}
+if [ -z "$python_bin" ]; then
+  if command -v python3 >/dev/null 2>&1; then python_bin=python3
+  elif command -v python >/dev/null 2>&1; then python_bin=python
+  else printf 'FAIL: Python 3 is required (set PYTHON)\n' >&2; exit 1
+  fi
+fi
+"$python_bin" -I -c 'import sys; assert sys.version_info.major == 3' || { printf 'FAIL: PYTHON must select Python 3\n' >&2; exit 1; }
 repo=$(cd "$(dirname "$0")/.." && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -48,7 +57,7 @@ for alias in using-mulix mulix-using-mulix; do
   mulix init --dir "$legacy" --host "$host" >/dev/null
   old=".$host/skills/$alias/SKILL.md"
   mkdir -p "$(dirname "$legacy/$old")"
-  python -I - "$repo/internal/scaffold/testdata/legacy/$alias.md" "$legacy/$old" ".$host/skills" <<'PY'
+  "$python_bin" -I - "$repo/internal/scaffold/testdata/legacy/$alias.md" "$legacy/$old" ".$host/skills" <<'PY'
 import pathlib, sys
 source, target, skills = sys.argv[1:]
 pathlib.Path(target).write_bytes(pathlib.Path(source).read_bytes().replace(b'{{SKILLS_DIR}}', skills.encode()))
@@ -83,7 +92,7 @@ conflict="$work/conflict"
 mulix init --dir "$conflict" --host dsh >/dev/null
 # Model a previously recorded vendor version using fixture metadata; current
 # N remains the real embedded template. Never modify/rebuild repository assets.
-python -I - "$conflict" "$rel" <<'PY'
+"$python_bin" -I - "$conflict" "$rel" <<'PY'
 import hashlib, json, pathlib, sys
 root, rel = pathlib.Path(sys.argv[1]), sys.argv[2]
 local = root / rel
@@ -106,7 +115,7 @@ for n in 1 2; do
   cmp "$work/base-before.md" "$conflict/.mulix/.installed/$rel"
   ! grep -q '^<<<<<<< incoming (mulix)' "$conflict/$rel"
 done
-python -I - "$conflict" "$rel" <<'PY'
+"$python_bin" -I - "$conflict" "$rel" <<'PY'
 import json, pathlib, sys
 root, rel = pathlib.Path(sys.argv[1]), sys.argv[2]
 st = json.loads((root / '.mulix/install-state.json').read_text())
@@ -127,7 +136,7 @@ cmp "$work/vendor.md" "$conflict/.mulix/.installed/$rel"
 update "$conflict" >/dev/null
 cmp "$work/accepted.md" "$conflict/$rel"
 test ! -e "$conflict/.claude"
-python -I - "$conflict/.mulix/install-state.json" <<'PY'
+"$python_bin" -I - "$conflict/.mulix/install-state.json" <<'PY'
 import json, pathlib, sys
 assert not json.loads(pathlib.Path(sys.argv[1]).read_text()).get('pending')
 PY

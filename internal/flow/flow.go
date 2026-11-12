@@ -82,7 +82,7 @@ var Table = []Transition{
 		Event:     EventSpecComplete,
 		From:      PhaseSpecify,
 		To:        PhaseClarify,
-		GuardRefs: []string{"spec-artifact-present"},
+		GuardRefs: []string{"spec-artifact-present", "acceptance-criteria-present"},
 	},
 	{
 		Event:     EventClarifyComplete,
@@ -108,7 +108,7 @@ var Table = []Transition{
 		Event:     EventTasksComplete,
 		From:      PhaseTasks,
 		To:        PhaseBuild,
-		GuardRefs: []string{"tasks-artifact-present", "tasks-have-task-sections"},
+		GuardRefs: []string{"tasks-artifact-present", "tasks-have-task-sections", "acceptance-matrix-complete"},
 	},
 	{
 		Event:     EventBuildComplete,
@@ -116,14 +116,14 @@ var Table = []Transition{
 		To:        PhaseVerify,
 		GuardRefs: []string{"execution-method-chosen", "plan-tasks-complete", "tdd-evidence-present"},
 		Effect: func(s *State) {
-			s.VerifyResult = VerifyPending
+			s.invalidateVerification()
 		},
 	},
 	{
 		Event:     EventVerifyPass,
 		From:      PhaseVerify,
 		To:        PhaseArchive,
-		GuardRefs: []string{"verification-report-present", "verify-result-pass"},
+		GuardRefs: []string{"verification-report-present", "verify-result-pass", "verification-evidence-current"},
 		Effect: func(s *State) {
 			s.ArchiveConfirmation = ArchivePending
 		},
@@ -135,14 +135,25 @@ var Table = []Transition{
 		GuardRefs: []string{"verification-failed"},
 		Effect: func(s *State) {
 			s.VerifyFailures++
-			s.VerifyResult = VerifyPending
+			s.invalidateVerification()
+		},
+	},
+	{
+		Event:     EventVerifyFail,
+		From:      PhaseArchive,
+		To:        PhaseBuild,
+		GuardRefs: []string{"verification-failed"},
+		Effect: func(s *State) {
+			s.VerifyFailures++
+			s.invalidateVerification()
+			s.ArchiveConfirmation = ArchivePending
 		},
 	},
 	{
 		Event:     EventArchived,
 		From:      PhaseArchive,
 		To:        PhaseArchive,
-		GuardRefs: []string{"archive-confirmed"},
+		GuardRefs: []string{"archive-confirmed", "verification-evidence-current"},
 		Effect: func(s *State) {
 			s.Archived = true
 		},
@@ -184,6 +195,9 @@ func Apply(s State, event Event) (State, error) {
 	t, ok := Find(s.Phase, event)
 	if !ok {
 		return State{}, fmt.Errorf("flow: no transition for event %q from phase %q", event, s.Phase)
+	}
+	if s.Archived && t.To != s.Phase {
+		return State{}, fmt.Errorf("flow: archived change %q cannot change phase", s.Change)
 	}
 	next := s
 	next.Phase = t.To

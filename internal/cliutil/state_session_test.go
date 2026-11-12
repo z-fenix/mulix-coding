@@ -45,7 +45,7 @@ func TestArchive_PreservesBindingAndConditionallyClearsGlobal(t *testing.T) {
 	if err := state.SetActive(root, "Y"); err != nil {
 		t.Fatal(err)
 	}
-	out, err := runPresetCLI(t, "state", "transition", "archived", "--session-id", "A")
+	out, err := runPresetCLI(t, "state", "transition", "archived", "--force", "--reason", "session cleanup fixture; not delivery qualification", "--session-id", "A")
 	if err != nil {
 		t.Fatalf("%s %v", out, err)
 	}

@@ -3,11 +3,11 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps start as `- [ ] **Step N: ...**`; mark only actually completed steps `- [X] **Step N: ...**`.
 
 <!-- Written by the tasks phase via the writing-plans skill; executed by
-     the build phase. mulix depends on exactly one structural rule here:
-     every task is a "## Task N: <name>" section, numbered 1..n in
-     execution order with no gaps — the executors extract task briefs by
-     that heading, and the guards match the execution ledger and task
-     reports to it. Everything else follows writing-plans. -->
+     the build phase. mulix requires numbered task sections AND the
+     mulix-tests acceptance matrix below. Every task is a "## Task N: <name>"
+     section, numbered 1..n in execution order with no gaps. Executors extract
+     task briefs by that heading; guards match task declarations and receipts
+     to it. -->
 
 **Goal:** [One sentence describing what this builds]
 
@@ -36,6 +36,39 @@ tests exercise that are most likely to bite a person using this software
 — one line each, most likely first. Each line gets its pinning test added
 to the task that owns the code.]
 
+## Acceptance Test Matrix
+
+Keep exactly one `mulix-tests` YAML fence. Replace the sample mappings with
+reviewed cases: declare every numbered task, cover every AC and every task,
+and use unique TC identifiers. The `test` is an exact emitted test identity
+(`go-json`: module/package#TestName); `file` is its project-relative source file,
+not a runtime output. Expected values come from the specification.
+Read `.mulix/templates/quality-template.md` and configure project-owned
+`.mulix/quality.yaml` before `tasks-complete`. Every case's suite must exist.
+
+```mulix-tests
+tasks:
+  - number: 1
+    kind: code
+cases:
+  - id: TC-001
+    criterion: AC-001
+    task: 1
+    point: exact value preservation
+    given: a literal input
+    when: the public operation runs
+    then: the returned value equals the literal input
+    suite: unit
+    test: fixture#TestValue
+    file: value_test.go
+```
+
+For an existing-behavior verification or documentation-only task, declare
+`kind: verification` or `kind: documentation` and a concrete `reason`. Its steps
+run a meaningful executable check with `mulix test run --task N --stage check`,
+not an invented failure. Code tasks use actual runner RED then GREEN; a build
+error or missing command is not a behavioral RED. Commit only when authorized.
+
 ---
 
 ## Task 1: [Component Name]
@@ -57,8 +90,8 @@ to the task that owns the code.]
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `[exact test command]`
-Expected: FAIL with "[expected failure message]"
+Run: `mulix test run --task 1 --stage red`
+Expected: Successful RED receipt for the mapped behavioral failure; not a build or environment failure.
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -68,8 +101,8 @@ Expected: FAIL with "[expected failure message]"
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `[exact test command]`
-Expected: PASS
+Run: `mulix test run --task 1 --stage green`
+Expected: All selected suites and mapped tests pass; a source-bound GREEN receipt is recorded.
 
 - [ ] **Step 5: Commit**
 

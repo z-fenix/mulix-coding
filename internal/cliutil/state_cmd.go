@@ -3,6 +3,8 @@ package cliutil
 import (
 	"fmt"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -42,6 +44,8 @@ func newStateShowCmd() *cobra.Command {
 		fmt.Printf("report_path:   %s\n", s.ReportPath)
 		fmt.Printf("verify_result: %s (failures: %d)\n", s.VerifyResult, s.VerifyFailures)
 		fmt.Printf("archived:      %v\n", s.Archived)
+		fmt.Printf("quality_runs:  %d (latest task/stage attempts)\n", len(s.QualityRuns))
+		fmt.Printf("guard_overrides: %d (recovery bypasses, not acceptance)\n", len(s.GuardOverrides))
 		printNextEvents(s.Phase)
 		return nil
 	}}
@@ -59,6 +63,7 @@ func writableState(r sessionctx.Resolved, current flow.State) error {
 func newStateTransitionCmd() *cobra.Command {
 	var change string
 	var force bool
+	var reason string
 	cmd := &cobra.Command{Use: "transition <event>", Short: "Check guards and advance state under the change lock", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		store, r, err := resolveCommandContext(cmd, change, sessionctx.Mutate)
 		if err != nil {
@@ -80,7 +85,18 @@ func newStateTransitionCmd() *cobra.Command {
 			report := guard.Run(store.Root(), *s, event)
 			printGuardReport(report)
 			if !report.Passed() && !force {
-				return fmt.Errorf("guard checks failed for event %q (use --force to override; not recommended)", event)
+				return fmt.Errorf("guard checks failed for event %q (use --force with --reason for recovery; not verification)", event)
+			}
+			if !report.Passed() && force {
+				if strings.TrimSpace(reason) == "" {
+					return fmt.Errorf("recovery --force requires an explicit --reason")
+				}
+				var checks []string
+				for _, failure := range report.Failures() {
+					checks = append(checks, failure.Name)
+				}
+				s.GuardOverrides = append(s.GuardOverrides, flow.GuardOverride{Event: event, Phase: s.Phase, Reason: strings.TrimSpace(reason), Checks: checks, At: time.Now().UTC()})
+				fmt.Println("WARNING: readiness overridden for recovery; no test evidence or release qualification was created")
 			}
 			next, err := flow.Apply(*s, event)
 			if err == nil {
@@ -109,6 +125,7 @@ func newStateTransitionCmd() *cobra.Command {
 	}}
 	cmd.Flags().StringVar(&change, "change", "", "change id (must match a session's effective context)")
 	cmd.Flags().BoolVar(&force, "force", false, "skip readiness guards for a legal transition (recovery only)")
+	cmd.Flags().StringVar(&reason, "reason", "", "required explanation when --force bypasses failed readiness")
 	return cmd
 }
 

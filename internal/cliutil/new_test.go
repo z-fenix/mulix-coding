@@ -80,7 +80,7 @@ func TestNew_LegacyNumberedChangeCanStillSelectAndTransition(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(full, []byte("# Legacy specification\n"), 0o644); err != nil {
+	if err := os.WriteFile(full, []byte("# Legacy specification\nFR-001: Preserve legacy selection.\n```mulix-acceptance\ncriteria:\n  - id: AC-001\n    requirement: FR-001\n    expected: The legacy change can transition to clarify.\n```\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	out, err = runPresetCLI(t, "state", "transition", "spec-complete")

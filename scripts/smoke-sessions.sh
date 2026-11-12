@@ -28,8 +28,8 @@ change() { mulix state show --session-id "$1" | sed -n 's/^change: *//p'; }
 a=$(change session-A)
 b=$(change session-B)
 # --force here only constructs phase fixtures; guard behavior is tested in e2e.
-for event in spec-complete clarify-complete; do mulix state transition "$event" --force --session-id session-A >/dev/null; done
-for event in spec-complete clarify-complete design-approved tasks-complete; do mulix state transition "$event" --force --session-id session-B >/dev/null; done
+for event in spec-complete clarify-complete; do mulix state transition "$event" --force --reason 'session phase fixture; not delivery qualification' --session-id session-A >/dev/null; done
+for event in spec-complete clarify-complete design-approved tasks-complete; do mulix state transition "$event" --force --reason 'session phase fixture; not delivery qualification' --session-id session-B >/dev/null; done
 expect_hook() {
   local id=$1 path=$2 expected=$3 out code
   if out=$(printf '{"session_id":"%s","tool_name":"Write","tool_input":{"file_path":"%s"}}' "$id" "$path" | mulix hook 2>"$work/hook-error"); then code=0; else code=$?; fi
@@ -68,7 +68,7 @@ expect_hook session-A src/code.go 2
 if mulix context show --session-id session-A >/dev/null 2>&1; then printf 'FAIL: corrupt binding fell back\n' >&2; exit 1; fi
 mulix context unbind --session-id session-A >/dev/null
 expect_hook session-A src/code.go 0
-for event in build-complete verify-pass archived; do mulix state transition "$event" --force --session-id session-B >/dev/null; done
+for event in build-complete verify-pass archived; do mulix state transition "$event" --force --reason 'session phase fixture; not delivery qualification' --session-id session-B >/dev/null; done
 test ! -f .mulix/active
 expect_hook session-B src/code.go 2
 expect_hook session-C src/code.go 0

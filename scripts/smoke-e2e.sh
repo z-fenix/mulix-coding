@@ -70,7 +70,26 @@ expect_hook deny "src/main.go"
 expect_hook deny ".mulix/.runtime/$c/state.yaml"
 expect_hook allow "docs/specs/$c/spec.md"
 mkdir -p "docs/specs/$c"
-printf '# Spec\n\n## Clarifications\n\n- Q: x → A: y\n' > "docs/specs/$c/spec.md"
+cat > "docs/specs/$c/spec.md" <<'EOF'
+# Spec
+
+- FR-001: Value returns exactly two.
+- FR-002: The greeting CLI prints hello.
+
+```mulix-acceptance
+criteria:
+  - id: AC-001
+    requirement: FR-001
+    expected: Value returns exactly two.
+  - id: AC-002
+    requirement: FR-002
+    expected: The CLI exits zero and stdout equals hello.
+```
+
+## Clarifications
+
+- Q: Is a newline required? → A: No; stdout is exactly hello.
+EOF
 mulix state set spec_path "docs/specs/$c/spec.md" >/dev/null
 mulix state transition spec-complete >/dev/null
 
@@ -107,6 +126,35 @@ expect_hook deny ".mulix/.runtime/$c/specs/2026-01-01-greeting-design.md"
 cat > "docs/changes/$c/tasks.md" <<'EOF'
 # Greeting Implementation Plan
 
+```mulix-tests
+tasks:
+  - number: 1
+    kind: code
+  - number: 2
+    kind: code
+cases:
+  - id: TC-001
+    criterion: AC-001
+    task: 1
+    point: exact numeric value
+    given: a fixture module
+    when: Value is called
+    then: the result equals two
+    suite: unit
+    test: fixture#TestValue
+    file: value_test.go
+  - id: TC-002
+    criterion: AC-002
+    task: 2
+    point: real CLI stdout and exit status
+    given: the greeting executable source
+    when: the CLI is run
+    then: exit zero and stdout hello
+    suite: integration
+    test: fixture#TestGreetingCLI
+    file: cli_test.go
+```
+
 ## Task 1: Greeter
 
 - [ ] **Step 1: Write the failing test**
@@ -121,6 +169,20 @@ cat > "docs/changes/$c/tasks.md" <<'EOF'
 ## Task 2: CLI
 
 - [ ] **Step 1: Write the failing test**
+EOF
+cat > .mulix/quality.yaml <<'EOF'
+schema: mulix.quality.v1
+suites:
+  - id: unit
+    command: [go, test, -json, -count=1, -run, '^TestValue$', .]
+    cwd: .
+    format: go-json
+    timeout_seconds: 120
+  - id: integration
+    command: [go, test, -json, -count=1, -run, '^TestGreetingCLI$', .]
+    cwd: .
+    format: go-json
+    timeout_seconds: 120
 EOF
 mulix state set tasks_path "docs/changes/$c/tasks.md" >/dev/null
 mulix state transition tasks-complete >/dev/null
@@ -146,7 +208,17 @@ base=$(git rev-parse HEAD)
 # The existing brief is deliberately stale; fenced examples stay unchecked.
 perl -0777 -pi -e 's/\Q- [ ] **Step 1: Write the failing test**\E/- [X] **Step 1: Write the failing test**/' "docs/changes/$c/tasks.md"
 cp "$ws/task-1-brief.md" "$work/brief-before.md"
-echo "package main" > main.go && git add main.go && git commit -qm "task 1"
+printf 'module fixture\n\ngo 1.27.0\n' > go.mod
+printf 'package fixture\nfunc Value() int { return 0 }\n' > value.go
+cat > value_test.go <<'EOF'
+package fixture
+import "testing"
+func TestValue(t *testing.T) {
+    if Value() != 2 { t.Fatalf("Value = %d; want 2", Value()) }
+}
+EOF
+mulix test run --task 1 --stage red >/dev/null
+printf 'package fixture\nfunc Value() int { return 2 }\n' > value.go
 done_script=.claude/skills/executing-plans/scripts/task-done
 rc=0
 bash "$done_script" "docs/changes/$c/tasks.md" 1 "$base" -- bash -c 'printf "expected failure\n"; exit 7' >/dev/null 2>&1 || rc=$?
@@ -154,7 +226,7 @@ bash "$done_script" "docs/changes/$c/tasks.md" 1 "$base" -- bash -c 'printf "exp
 test ! -f "$ws/progress.md"
 cmp "$work/brief-before.md" "$ws/task-1-brief.md"
 grep -q 'expected failure' "$ws/task-1-tests.log"
-bash "$done_script" "docs/changes/$c/tasks.md" 1 "$base" -- echo "ok  greet  0.01s" >/dev/null
+bash "$done_script" "docs/changes/$c/tasks.md" 1 "$base" -- mulix test run --task 1 --stage green >/dev/null
 # Compare the entire refreshed brief, not just the presence of an X marker.
 cat > "$work/brief-expected.md" <<'EOF'
 ## Task 1: Greeter
@@ -183,11 +255,22 @@ expect_fail bash "$done_script" "docs/changes/$c/tasks.md" 99 "$base" -- true
 cmp "$work/ledger-before.md" "$ws/progress.md"
 expect_fail mulix state transition build-complete   # Task 2 not done, no reports
 base=$(git rev-parse HEAD)
-echo "// cli" >> main.go && git commit -qam "task 2"
-bash .claude/skills/executing-plans/scripts/task-done "docs/changes/$c/tasks.md" 2 "$base" -- echo "ok  greet  0.01s" >/dev/null
-for n in 1 2; do
-  printf -- '- RED: go test ./... → FAIL: undefined (expected)\n- GREEN: go test ./... → ok\n' > "$ws/task-$n-report.md"
-done
+mkdir -p cmd/greet
+printf 'package main\nimport "fmt"\nfunc main(){fmt.Print("")}\n' > cmd/greet/main.go
+cat > cli_test.go <<'EOF'
+package fixture
+import (
+    "os/exec"
+    "testing"
+)
+func TestGreetingCLI(t *testing.T) {
+    out, err := exec.Command("go", "run", "./cmd/greet").CombinedOutput()
+    if err != nil || string(out) != "hello" { t.Fatalf("CLI: %v %q; want hello", err, out) }
+}
+EOF
+mulix test run --task 2 --stage red >/dev/null
+printf 'package main\nimport "fmt"\nfunc main(){fmt.Print("hello")}\n' > cmd/greet/main.go
+bash .claude/skills/executing-plans/scripts/task-done "docs/changes/$c/tasks.md" 2 "$base" -- mulix test run --task 2 --stage green >/dev/null
 mulix state transition build-complete >/dev/null
 
 step verify
@@ -196,15 +279,31 @@ expect_hook allow "$scratch/verification/full-suite.log"
 expect_hook deny ".mulix/.runtime/$c/verification/full-suite.log"
 expect_hook deny ".mulix/.runtime/$c/sdd/tasks/progress.md"
 expect_hook deny "src/main.go"
-echo "all green" > "docs/changes/$c/report.md"
+cat > "docs/changes/$c/report.md" <<'EOF'
+# Delivery review
+
+- AC-001: exact Value assertion reviewed against FR-001.
+- AC-002: subprocess exit/stdout assertion reviewed against FR-002.
+
+```mulix-review
+reviewer: smoke fixture review (synthetic, not human approval)
+result: approved
+blocking: []
+```
+EOF
 mulix state set report_path "docs/changes/$c/report.md" >/dev/null
 mulix state set verify_result pass >/dev/null
+expect_fail mulix state transition verify-pass  # manual flag is not evidence
+mulix verify >/dev/null
 mulix state transition verify-pass >/dev/null
 
 step archive
 expect_hook deny "docs/changes/$c/report.md"
 expect_fail mulix state transition archived
 mulix state set archive_confirmation confirmed >/dev/null
+printf '\n// stale input probe\n' >> value.go
+expect_fail mulix state transition archived
+mulix verify >/dev/null  # revalidation in not-yet-archived archive phase
 mulix state transition archived >/dev/null
 test ! -f .mulix/active
 

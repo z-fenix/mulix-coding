@@ -110,6 +110,25 @@
 - **[Entity 1]**: [What it represents, key attributes without implementation]
 - **[Entity 2]**: [What it represents, relationships to other entities]
 
+## Acceptance Criteria *(mandatory)*
+
+Replace this example with concrete, independently derived expectations. Keep
+exactly one `mulix-acceptance` YAML fence. Every FR identifier in this spec must
+have at least one AC; each `requirement` is a single existing FR identifier.
+Delete unused example requirements and clarification examples before approval.
+An expected result describes observable behavior, not “matches implementation”.
+
+```mulix-acceptance
+criteria:
+  - id: AC-001
+    requirement: FR-001
+    expected: The requested value is returned unchanged.
+```
+
+The tasks phase maps each AC to executable cases; the runner verifies those exact
+tests actually ran. Traceability does not prove an assertion is sufficient: review
+normal, boundary, error, permission and integration behavior against the spec.
+
 ## Success Criteria *(mandatory)*
 
 <!--

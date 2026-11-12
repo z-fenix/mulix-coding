@@ -1,10 +1,6 @@
 package guard
 
-import (
-	"testing"
-
-	"github.com/z-fenix/mulix-coding/internal/flow"
-)
+import "testing"
 
 func TestCompletedTasks_LedgerFormats(t *testing.T) {
 	for _, tc := range []struct {
@@ -29,7 +25,7 @@ func TestCompletedTasks_LedgerFormats(t *testing.T) {
 	}
 }
 
-func TestRun_BuildCompletePassesWithSectionedLedger(t *testing.T) {
+func TestPlanTasksCompletePassesWithSectionedLedger(t *testing.T) {
 	root := t.TempDir()
 	s, ws := buildFixture(t, root, twoTasks)
 	writeFile(t, root, ws+"/progress.md", `# SDD progress — plan: docs/changes/001-x/tasks.md
@@ -66,18 +62,18 @@ func TestRun_BuildCompletePassesWithSectionedLedger(t *testing.T) {
 `)
 	writeFile(t, root, ws+"/task-1-report.md", goodReport)
 	writeFile(t, root, ws+"/task-2-report.md", goodReport)
-	if report := Run(root, s, flow.EventBuildComplete); !report.Passed() {
-		t.Fatalf("expected sectioned ledger to pass, failures: %+v", report.Failures())
+	if report := checkPlanTasksComplete(root, s); !report.Pass {
+		t.Fatalf("expected sectioned ledger to pass, failures: %+v", report.Next)
 	}
 }
 
-func TestRun_BuildCompletePassesWithMarkdownLedger(t *testing.T) {
+func TestPlanTasksCompletePassesWithMarkdownLedger(t *testing.T) {
 	root := t.TempDir()
 	s, ws := buildFixture(t, root, twoTasks)
 	writeFile(t, root, ws+"/progress.md", "# SDD ledger — plan: docs/changes/001-x/tasks.md\n\n- Task 1: complete (commits a..b, review clean)\n- Task 2: Ruling: kept the flag name\n- Task 2: complete (commits b..c, review clean)\n")
 	writeFile(t, root, ws+"/task-1-report.md", goodReport)
 	writeFile(t, root, ws+"/task-2-report.md", goodReport)
-	if report := Run(root, s, flow.EventBuildComplete); !report.Passed() {
-		t.Fatalf("expected list ledger to pass, failures: %+v", report.Failures())
+	if report := checkPlanTasksComplete(root, s); !report.Pass {
+		t.Fatalf("expected list ledger to pass, failures: %+v", report.Next)
 	}
 }

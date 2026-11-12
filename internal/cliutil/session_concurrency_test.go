@@ -79,7 +79,7 @@ func TestSessionCLI_ArchiveRaceDoesNotClearNewActive(t *testing.T) {
 	if err := state.SetActive(root, "Y"); err != nil {
 		t.Fatal(err)
 	}
-	out, err := sessionCLIProcess(root, "state", "transition", "archived", "--session-id", "A").CombinedOutput()
+	out, err := sessionCLIProcess(root, "state", "transition", "archived", "--force", "--reason", "selection race fixture; not delivery qualification", "--session-id", "A").CombinedOutput()
 	if err != nil {
 		t.Fatalf("archive subprocess: %v %s", err, out)
 	}

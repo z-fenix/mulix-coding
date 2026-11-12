@@ -80,8 +80,9 @@ Two mechanisms provide workflow control from that state:
    transition applies — an artifact exists and is non-empty, the design
    approval and execution method are recorded, tasks.md has `## Task N`
    sections numbered 1..n, the execution ledger has a `Task N: complete`
-   line for every task, and every task's report carries RED and GREEN
-   evidence.
+   line for every task, and source-bound CLI receipts prove actual mapped
+   RED/GREEN runs (or reasoned non-code CHECKs). Final verification executes
+   every project-configured mandatory suite and binds the reviewed report.
 2. **The PreToolUse hook** (`mulix hook`) checks Claude Code's
    `Write`/`Edit` calls against the phase whitelist, including runtime
    subdirectories (design: `specs/`; build: `sdd/`). Transient output is
@@ -104,11 +105,13 @@ allows the call. No current change allows ordinary writes outside runtime, but r
 owning change and session-mode control metadata stays CLI-only. DeepSeek Harness has no equivalent hook:
 agents follow phase discipline, while CLI transitions run guards.
 
-Guards check the **structure of recorded evidence**, not whether a human
-really approved something or a test actually ran. `flow.Table.GuardRefs`
-is the single source of readiness checks. `state transition --force`
-skips readiness only, never an illegal phase/event check. Neither hook nor
-guards authenticate a local writer or make the filesystem unbypassable.
+`flow.Table.GuardRefs` is the single source of readiness checks. Guards consume
+CLI-generated execution receipts rather than handwritten pass claims. They do
+not authenticate reviewer consent or prove assertions match product intent.
+`state transition --force --reason "recovery explanation"` records readiness
+bypasses, never makes an illegal phase/event legal and never creates test
+qualification. Neither hook nor local receipts authenticate a writer controlling
+the filesystem; this is not cryptographic attestation.
 
 ## Multiple sessions in one checkout
 
@@ -359,10 +362,11 @@ transition`, and `guard`; each defaults to the active change, which
 `state select` sets. `mulix new --branch <name>` records a git branch
 name in the change's state — mulix does not create the branch itself.
 
-`mulix state transition --force` applies a transition even when guard
-checks fail, but only for an event legal from the current phase. It is a
-readiness recovery override, not permission to skip the phase table; do
-not use it to conceal missing approval or verification.
+`mulix state transition --force --reason "recovery explanation"` applies a
+legal transition despite failed readiness, and records failed checks, reason and
+time in state. It is recovery, not delivery acceptance. `state show` reports the
+override count; a forced archive can be archived but unqualified. Receipts and
+override records are not settable through `state set`.
 
 Settable fields: `spec_path`, `tasks_path`, `report_path`,
 `clarify_skipped`, `design_track` (`bounded|architectural`),
@@ -371,6 +375,56 @@ Settable fields: `spec_path`, `tasks_path`, `report_path`,
 
 `mulix hook` is the `PreToolUse` entry point Claude Code invokes; you
 won't normally run it by hand.
+
+## Verifiable acceptance (P0)
+
+Before `tasks-complete`, configure project-owned `.mulix/quality.yaml` using the
+installed `quality-template.md` ([source reference](assets/templates/quality-template.md)).
+Each suite declares an argv command, project-relative cwd, timeout and `go-json`
+or generic JSON-lines adapter. Every configured suite is mandatory at final
+verification; declare nested modules and integration suites explicitly.
+
+- spec.md: one `mulix-acceptance` YAML fence, AC → FR + observable expectation.
+- tasks.md: one `mulix-tests` YAML fence, TC → AC/task + point, Given/When/Then,
+  suite, exact emitted test identity and test source file. Cover every AC/task.
+- report.md: one `mulix-review` YAML fence, reviewer reference, `result: approved`
+  and `blocking: []`. Semantic test quality and reviewer independence need review.
+
+```sh
+# Build phase, after writing the behavior test:
+mulix test run --task 1 --stage red
+# Implement without changing the mapped test or approved contract, then:
+mulix test run --task 1 --stage green
+# A reasoned documentation/verification task instead uses --stage check.
+mulix state transition build-complete
+# Obtain and record whole-change review in the existing final report, then:
+mulix verify
+mulix state transition verify-pass
+# Get the human's finishing decision before archive confirmation.
+```
+
+A successful RED command means the runner observed a real mapped test failure;
+it retains the subprocess's nonzero exit. Infrastructure failures, empty suites,
+all-skipped/missing mapped tests, malformed streams and false PASS text fail
+closed. Incomplete/failed retries supersede old successes. Corrective
+`verify-fail` and new `build-complete` cycles invalidate earlier final verification
+without erasing task provenance. Receipts in existing
+state.yaml bind physical project, change, spec/plan/policy, test files and source;
+full streams live in private system scratch, while existing reports retain
+summaries and state retains per-test counts/identities and stream digests.
+
+Final verification also binds the report and Git revision. Source, policy,
+contract or report changes stale normal verify/archive acceptance; checkbox-only
+step progress does not. `mulix verify` can refresh evidence in not-yet-archived
+archive phase after authorized finishing changes. If it fails there,
+`mulix state transition verify-fail` returns to build; already archived changes
+cannot reopen through that event. Directly setting `verify_result=pass` creates
+no evidence. Existing v2 state remains readable, but continuing old work requires
+the new contracts/receipts; historical archived examples are not rewritten.
+
+This is not the product-quality ceiling: only declared suites and mapped cases
+are checked. Ignored inputs/external dependencies, assertion adequacy, CI and
+native-platform/real-host qualification still need their own controls (P1/P2).
 
 ## Templates
 
@@ -385,13 +439,12 @@ per task with RED → GREEN → commit steps. Steps start as
 `- [X] **Step N: ...**` (capital X). This status-only edit to an approved
 plan is allowed, but task definitions, commands, and other approved text
 stay unchanged. An unperformed or unauthorized commit remains `[ ]` even
-when GREEN passes. Checkboxes do not replace ledger or RED/GREEN evidence.
+when GREEN passes. Checkboxes do not replace ledger or runner receipts.
 
-Guards depend on exactly two structural rules in those files: a literal
-`## Clarifications` heading in spec.md, and `## Task N` headings in
-tasks.md numbered 1..n (headings inside ``` fences don't count). Those
-headings are also what the build executors extract task briefs by and
-what the ledger's `Task N: complete` lines refer to.
+Guards also require the literal `## Clarifications` heading when clarification
+is recorded, `## Task N` headings numbered 1..n outside code fences, and the
+acceptance contracts above. Executors extract task briefs by those headings;
+ledger `Task N: complete` lines remain structural progress records.
 
 The phase skills (`assets/skills/mulix-*`) are thin: `mulix-specify` and
 `mulix-clarify` port spec-kit's specify/clarify commands; `mulix-design`,

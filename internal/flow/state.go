@@ -3,6 +3,8 @@ package flow
 import (
 	"slices"
 	"time"
+
+	"github.com/z-fenix/mulix-coding/internal/quality"
 )
 
 // VerifyResult tracks the outcome of the most recent verify phase run.
@@ -100,11 +102,39 @@ type State struct {
 	VerifyResult   VerifyResult `yaml:"verify_result,omitempty"`
 	VerifyFailures int          `yaml:"verify_failures"`
 
+	// QualityRuns are written by the test/verify commands, never state set.
+	// Reports are readable summaries; these receipts drive readiness checks.
+	QualityRuns    []quality.RunRecord `yaml:"quality_runs,omitempty"`
+	GuardOverrides []GuardOverride     `yaml:"guard_overrides,omitempty"`
+
 	ArchiveConfirmation ArchiveConfirmation `yaml:"archive_confirmation,omitempty"`
 	Archived            bool                `yaml:"archived"`
 
 	CreatedAt time.Time `yaml:"created_at"`
 	UpdatedAt time.Time `yaml:"updated_at"`
+}
+
+// GuardOverride records recovery, not successful verification.
+type GuardOverride struct {
+	Event  Event     `yaml:"event"`
+	Phase  Phase     `yaml:"phase"`
+	Reason string    `yaml:"reason"`
+	Checks []string  `yaml:"checks"`
+	At     time.Time `yaml:"at"`
+}
+
+// invalidateVerification keeps task provenance but requires a new final run
+// after corrective work or entry into a new verification cycle. Clone the
+// receipt slice because flow.Apply is a pure copy operation.
+func (s *State) invalidateVerification() {
+	s.VerifyResult = VerifyPending
+	s.QualityRuns = slices.Clone(s.QualityRuns)
+	for i := range s.QualityRuns {
+		if s.QualityRuns[i].Task == 0 && s.QualityRuns[i].Stage == "verify" {
+			s.QualityRuns[i].Success = false
+			s.QualityRuns[i].Error = "verification invalidated by phase transition; run mulix verify again"
+		}
+	}
 }
 
 // New returns a fresh State for a newly created change, starting in the

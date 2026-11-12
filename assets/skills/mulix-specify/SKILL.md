@@ -83,6 +83,8 @@ mulix state set spec_path docs/specs/<change>/spec.md
 mulix state transition spec-complete
 ```
 
-The guard checks that `spec_path` points at a real, non-empty file. It
-does not check content quality — that's your job, using the guidelines
-above, before calling transition, not the guard's.
+The guard checks a real spec and exactly one `mulix-acceptance` YAML fence
+from the template: unique AC identifiers, a concrete expected result, and
+coverage of every FR identifier. Define observable expectations independently
+of future implementation. Semantic completeness and product value still need
+review; structure alone does not establish them.

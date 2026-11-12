@@ -32,13 +32,21 @@ mulix specifics:
 - **Task headings:** `## Task N: <name>`, N = 1, 2, 3... in execution
   order, no gaps, each exactly once. The build executors extract briefs by
   this heading, and the guards match ledger lines and reports to it.
-- **Steps:** the RED → verify RED → GREEN → verify GREEN → commit order
-  writing-plans prescribes, with complete test and code blocks and
-  `Expected:` lines. The build phase's TDD evidence comes from these
-  steps. Start every step as `- [ ] **Step N: ...**`, following
-  writing-plans' checkbox format. Build marks that step `- [X]` only
-  after it actually runs and its expected result is verified; use a
-  capital X, never pre-check later steps.
+- **Steps:** code tasks use RED → verify RED → GREEN → verify GREEN with
+  `mulix test run --task N --stage red|green`, and commit only if authorized.
+  Verification/documentation tasks declare a concrete reason and run a real
+  `mulix test run --task N --stage check` instead of invented RED/GREEN.
+  Include complete test/code blocks and `Expected:` lines. Start every step
+  as `- [ ] **Step N: ...**`; mark `[X]` only after actual verified execution.
+- **Acceptance mapping:** use the `mulix-tests` fence in the tasks template.
+  Map every AC and task to concrete TC cases with point, Given/When/Then,
+  suite, exact emitted test name and project-relative test source file.
+  Derive assertions from the spec; review normal, boundary, error, permission
+  and integration cases. Declare each task's kind and non-code reason.
+- **Mandatory suites:** read `.mulix/templates/quality-template.md`, inspect
+  the project's actual test commands and configure `.mulix/quality.yaml`.
+  All declared suites run at final verification, including nested modules and
+  required integration checks; configuration remains project-owned.
 - `.mulix/templates/tasks-template.md` shows the resulting layout. If a
   preset overrides it (`mulix preset resolve tasks-template`), follow the
   override's structure — but the `## Task N` headings are not optional.
@@ -63,4 +71,5 @@ mulix state transition tasks-complete
 ```
 
 The guard checks tasks.md exists inside `docs/changes/<change>/`, is
-non-empty, and has `## Task N` sections numbered 1..n.
+non-empty, has `## Task N` sections numbered 1..n, and a complete acceptance
+matrix referring to configured suites. Missing mappings and policy fail closed.

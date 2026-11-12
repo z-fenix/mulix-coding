@@ -81,7 +81,7 @@ func TestTransition_ArchivingActiveChangeClearsActiveMarker(t *testing.T) {
 		t.Fatalf("SetActive: %v", err)
 	}
 
-	out, err := runPresetCLI(t, "state", "transition", "archived")
+	out, err := runPresetCLI(t, "state", "transition", "archived", "--force", "--reason", "context cleanup fixture; not delivery qualification")
 	if err != nil {
 		t.Fatalf("state transition archived: %v (output: %s)", err, out)
 	}
@@ -109,7 +109,7 @@ func TestTransition_ArchivingNonActiveChangeLeavesActiveMarkerAlone(t *testing.T
 		t.Fatalf("SetActive: %v", err)
 	}
 
-	out, err := runPresetCLI(t, "state", "transition", "archived", "--change", "add-login")
+	out, err := runPresetCLI(t, "state", "transition", "archived", "--force", "--reason", "context cleanup fixture; not delivery qualification", "--change", "add-login")
 	if err != nil {
 		t.Fatalf("state transition archived: %v (output: %s)", err, out)
 	}

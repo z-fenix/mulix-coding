@@ -101,12 +101,19 @@ func TestNextEvents_ListsAllLegalEventsFromPhase(t *testing.T) {
 	}
 }
 
-func TestNextEvents_TerminalPhaseHasNoOutboundEvents(t *testing.T) {
-	// Archive only has a self-loop (archived), never leaves the phase via
-	// a *different* From/To pair other than itself.
+func TestNextEvents_ArchiveSupportsRevalidationFailureRecovery(t *testing.T) {
 	events := NextEvents(PhaseArchive)
-	if len(events) != 1 || events[0] != EventArchived {
-		t.Fatalf("expected only [archived], got %v", events)
+	if len(events) != 2 || events[0] != EventVerifyFail || events[1] != EventArchived {
+		t.Fatalf("expected [verify-fail archived], got %v", events)
+	}
+}
+
+func TestApply_ArchivedChangeCannotReturnToBuild(t *testing.T) {
+	s := New("x", "")
+	s.Phase = PhaseArchive
+	s.Archived = true
+	if _, err := Apply(s, EventVerifyFail); err == nil {
+		t.Fatal("already archived change reopened")
 	}
 }
 

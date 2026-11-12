@@ -36,10 +36,13 @@ specify → clarify → design → tasks → build → verify → archive
    discipline for all writes. This is not a filesystem security sandbox.
 2. **Guard checks** (`mulix guard <event>`, run automatically inside
    `mulix state transition <event>`) check recorded evidence (artifact
-   existence, approval flags, ledger completion and RED/GREEN reports).
-   They do **not** authenticate human consent or prove tests actually
-   executed. A transition must be legal from the current phase; `--force`
-   skips readiness guards only and cannot make an illegal event legal.
+   existence, acceptance mappings, approval flags, ledger completion and
+   source-bound runner receipts). Use `mulix test run` and `mulix verify` for
+   actual executions; read `.mulix/templates/quality-template.md` when configuring
+   suites or interpreting receipts. Local records do not authenticate human
+   consent, assertion quality or a writer controlling all files. `--force` with
+   a nonempty `--reason` records a recovery bypass, never test qualification,
+   and cannot make an illegal event legal.
 
 ## Session context
 

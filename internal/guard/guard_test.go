@@ -1,6 +1,7 @@
 package guard
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,8 +19,8 @@ func TestRun_SpecCompleteFailsWhenArtifactMissing(t *testing.T) {
 	if report.Passed() {
 		t.Fatal("expected guard to fail when spec artifact is missing")
 	}
-	if len(report.Failures()) != 1 {
-		t.Fatalf("expected 1 failure, got %d", len(report.Failures()))
+	if failureNamed(report, "spec-artifact-present") == nil || failureNamed(report, "acceptance-criteria-present") == nil {
+		t.Fatalf("missing specification must fail both artifact and acceptance checks: %+v", report)
 	}
 }
 
@@ -29,7 +30,7 @@ func TestRun_SpecCompletePassesWhenArtifactPresent(t *testing.T) {
 	if err := os.MkdirAll(specDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte("# Spec\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(acceptanceSpec), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
@@ -135,6 +136,33 @@ func writeFile(t *testing.T, root, rel, content string) {
 	}
 }
 
+const acceptanceSpec = "# Spec\nFR-001: Return the required value.\n```mulix-acceptance\ncriteria:\n  - id: AC-001\n    requirement: FR-001\n    expected: Value returns exactly two.\n```\n"
+
+// acceptanceFixture supplies an honest mapping, not invented execution receipts.
+func acceptanceFixture(t *testing.T, root string, s *flow.State) {
+	t.Helper()
+	s.SpecPath = "docs/specs/" + s.Change + "/spec.md"
+	writeFile(t, root, s.SpecPath, acceptanceSpec)
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(s.TasksPath)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	numbers := TaskNumbers(string(data))
+	var b strings.Builder
+	b.WriteString("\n```mulix-tests\ntasks:\n")
+	for _, n := range numbers {
+		fmt.Fprintf(&b, "  - number: %d\n    kind: code\n", n)
+	}
+	b.WriteString("cases:\n")
+	for _, n := range numbers {
+		fmt.Fprintf(&b, "  - id: TC-%03d\n    criterion: AC-001\n    task: %d\n    point: required return value\n    given: a valid module\n    when: Value is called\n    then: the result is two\n    suite: unit\n    test: fixture#TestValue%d\n    file: value_test.go\n", n, n, n)
+	}
+	b.WriteString("```\n")
+	writeFile(t, root, s.TasksPath, string(data)+b.String())
+	writeFile(t, root, "value_test.go", "package fixture\n")
+	writeFile(t, root, ".mulix/quality.yaml", "schema: mulix.quality.v1\nsuites:\n  - id: unit\n    command: [go, test, -json, -count=1, ./...]\n    cwd: .\n    format: go-json\n")
+}
+
 // buildFixture lays out a change whose tasks.md holds tasksMD and whose
 // plan workspace (as sdd-workspace creates it) is .mulix/.runtime/001-x/
 // sdd/tasks/, returning the state and the workspace's rel path.
@@ -147,6 +175,7 @@ func buildFixture(t *testing.T, root, tasksMD string) (flow.State, string) {
 	s.Phase = flow.PhaseBuild
 	s.TasksPath = "docs/changes/001-x/tasks.md"
 	s.ExecutionMethod = flow.ExecInline
+	acceptanceFixture(t, root, &s)
 	return s, ws
 }
 
@@ -181,6 +210,7 @@ func TestStepCheckbox_TaskSectionsAndGuardsIgnoreStatusAndFencedExamples(t *test
 	s := flow.New(change, "")
 	s.Phase = flow.PhaseTasks
 	s.TasksPath = "docs/changes/" + change + "/tasks.md"
+	acceptanceFixture(t, root, &s)
 	if report := Run(root, s, flow.EventTasksComplete); !report.Passed() {
 		t.Fatalf("step status changed task-structure guards: %+v", report.Failures())
 	}
@@ -217,6 +247,7 @@ func TestRun_TasksCompletePassesWithNumberedSections(t *testing.T) {
 	s := flow.New("001-x", "")
 	s.Phase = flow.PhaseTasks
 	s.TasksPath = "docs/changes/001-x/tasks.md"
+	acceptanceFixture(t, root, &s)
 
 	if report := Run(root, s, flow.EventTasksComplete); !report.Passed() {
 		t.Fatalf("expected pass, failures: %+v", report.Failures())
@@ -357,29 +388,21 @@ func TestRun_BuildCompleteRequiresRedAndGreenEvidence(t *testing.T) {
 	if f == nil {
 		t.Fatal("expected tdd-evidence-present to fail when Task 2 has no RED evidence")
 	}
-	if !strings.Contains(f.Next, "Task 2 (no RED evidence)") {
-		t.Fatalf("expected the hint to name Task 2's missing RED, got %q", f.Next)
+	if !strings.Contains(f.Next, "runner-generated green evidence") {
+		t.Fatalf("expected an actionable runner hint rather than text parsing, got %q", f.Next)
 	}
 }
 
-func TestRun_BuildCompleteRejectsEmptyPhaseLines(t *testing.T) {
-	if got := tddEvidenceProblem("- RED:\n- GREEN:\n"); got == "" {
-		t.Fatal("expected bare RED:/GREEN: labels with no evidence to be rejected")
-	}
-	if got := tddEvidenceProblem("  - **RED:** go test → FAIL\n  - **GREEN:** go test → ok\n"); got != "" {
-		t.Fatalf("expected bolded implementer-template labels to count, got %q", got)
-	}
-}
-
-func TestRun_BuildCompletePassesWithLedgerAndReports(t *testing.T) {
+func TestRun_BuildCompleteRejectsLedgerAndHandwrittenReports(t *testing.T) {
 	root := t.TempDir()
 	s, ws := buildFixture(t, root, twoTasks)
 	writeFile(t, root, ws+"/progress.md", "# SDD ledger — plan: docs/changes/001-x/tasks.md\nTask 1: complete (commits a..b, review clean)\nTask 2: Ruling: kept the flag name — spec says so — rename later\nTask 2: complete (commits b..c, review clean)\n")
 	writeFile(t, root, ws+"/task-1-report.md", goodReport)
 	writeFile(t, root, ws+"/task-2-report.md", goodReport)
 
-	if report := Run(root, s, flow.EventBuildComplete); !report.Passed() {
-		t.Fatalf("expected pass, failures: %+v", report.Failures())
+	report := Run(root, s, flow.EventBuildComplete)
+	if len(report.Failures()) != 1 || failureNamed(report, "tdd-evidence-present") == nil {
+		t.Fatalf("complete ledger must pass structurally, but text reports cannot qualify execution: %+v", report)
 	}
 }
 

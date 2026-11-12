@@ -5,10 +5,9 @@ description: Use when the active change is in the build phase, before writing an
 
 # Build phase
 
-tasks.md is the implementation plan; this phase executes it, every task
-under `test-driven-development`. Nothing here replaces those skills —
-this skill picks the executor, and says where mulix expects their
-records.
+tasks.md is the implementation plan. Code tasks execute under
+`test-driven-development`; reasoned verification/documentation tasks run CHECK.
+This skill picks the executor and connects its records to actual CLI execution.
 
 ## 1. Choose the execution method
 
@@ -35,8 +34,9 @@ method unless the human asks to change it.
 
 ## 2. Execute
 
-**REQUIRED SUB-SKILL:** `test-driven-development`, loaded before Task 1.
-Then, by method:
+**REQUIRED SUB-SKILL:** load `test-driven-development` before the first code
+ task. For a declared, reasoned non-code task, the CHECK contract below replaces
+ the executor's generic RED/GREEN steps. Then, by method:
 
 - subagent-driven → **REQUIRED SUB-SKILL:** `subagent-driven-development`
 - inline → **REQUIRED SUB-SKILL:** `executing-plans`
@@ -63,13 +63,19 @@ these mulix specifics:
   do work in a new worktree, run mulix commands from it and keep
   `.mulix/` there — the hook and guards read state relative to the
   directory the agent session runs in.
-- **TDD evidence, both methods.** For every task, the workspace must hold
-  `task-N-report.md` with a `RED:` line (the command, the failing output
-  before implementation, why the failure was expected) and a `GREEN:` line
-  (the command and passing output after). The subagent-driven implementer
-  writes this under its report contract ("TDD Evidence"). Under inline,
-  write it yourself as you finish each task's GREEN step — `task-done`
-  keeps the test log but doesn't write the report.
+- **Runner evidence, both methods.** Read the matrix in tasks.md and
+  `.mulix/templates/quality-template.md`. For a `code` task, write an executable
+  behavioral test, then `mulix test run --task N --stage red`; keep test files,
+  policy and approved definitions stable, implement the fix, then
+  `mulix test run --task N --stage green`. RED succeeds only when a mapped test
+  actually fails; compilation/missing-command failures are not RED. For a
+  reasoned `verification` or `documentation` task, run its real executable
+  check with `mulix test run --task N --stage check`. The CLI owns receipts in
+  state.yaml and appends summaries to `task-N-report.md`; explain relevant
+  behavior/output in that same report without overwriting runner summaries.
+  `task-done` records structural ledger completion; it does not create runner
+  evidence. For inline completion, pass the applicable `mulix test run` command
+  as its test command; the prior RED still must have run before implementation.
 - **Step status.** After each step actually runs and its expected result
   is verified, change only its `- [ ]` marker in approved tasks.md to
   `- [X]` (capital X). This status-only edit is allowed. Keep task numbers,
@@ -114,9 +120,9 @@ mulix state transition build-complete
 The guard checks that `execution_method` is recorded, the ledger at
 `.mulix/.runtime/<change>/sdd/tasks/progress.md` names tasks.md on its
 first line and has a `- Task N: complete` list item for every `## Task N`
-section (legacy plain completion lines also count), and every task has a
-report with RED and GREEN evidence. A fix
-round or a Ruling line is not a completion line.
+section (legacy plain completion lines also count), and every task has valid
+runner receipts for its declared kind. Handwritten RED/GREEN prose is not an
+execution receipt. A fix round or a Ruling line is not a completion line.
 
 If a task can't be completed as planned, keep its definitions unchanged;
 only the verified step-status edits above are allowed. The guard matches
