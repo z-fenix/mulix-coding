@@ -98,7 +98,9 @@ func Block(md []byte, tag string, value any) error {
 			}
 		} else if fenceEnd(t, fence) {
 			if selected {
-				blocks = append(blocks, strings.Join(lines, "\n"))
+				// Every captured line ended before the closing fence. Retain its
+				// final newline so YAML |+/>+ scalars keep their declared value.
+				blocks = append(blocks, strings.Join(lines, "\n")+"\n")
 			}
 			fence = ""
 			selected = false

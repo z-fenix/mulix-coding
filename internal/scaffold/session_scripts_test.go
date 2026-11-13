@@ -34,7 +34,12 @@ func TestMain(m *testing.M) {
 		name += ".exe"
 	}
 	sessionTestBin = filepath.Join(dir, name)
-	cmd := exec.Command("go", "build", "-o", sessionTestBin, "./cmd/mulix")
+	args := []string{"build"}
+	if scriptRaceEnabled {
+		args = append(args, "-race")
+	}
+	args = append(args, "-o", sessionTestBin, "./cmd/mulix")
+	cmd := exec.Command("go", args...)
 	cmd.Dir = filepath.Join("..", "..")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "script CLI build: %v\n%s", err, out)

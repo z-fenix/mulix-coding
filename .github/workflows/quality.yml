@@ -1,0 +1,183 @@
+name: P1 quality
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p1-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  bundles:
+    name: Build immutable bundles
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      manifest_hash: ${{ steps.build.outputs.manifest_hash }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          set-safe-directory: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.3'
+          cache-dependency-path: '**/go.sum'
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14.8'
+      - name: Build candidate and pinned historical baseline
+        id: build
+        run: python -I -B scripts/quality.py bundles --ci --output "$RUNNER_TEMP/mulix-bundles"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        id: upload
+        with:
+          name: bundles-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/mulix-bundles/candidate
+            ${{ runner.temp }}/mulix-bundles/baseline
+          if-no-files-found: error
+          retention-days: 7
+
+  native:
+    name: Native ${{ matrix.target }}
+    needs: bundles
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {target: linux_amd64, runner: ubuntu-24.04, goarch: amd64, toolarch: x64}
+          - {target: linux_arm64, runner: ubuntu-24.04-arm, goarch: arm64, toolarch: arm64}
+          - {target: darwin_amd64, runner: macos-15-intel, goarch: amd64, toolarch: x64}
+          - {target: darwin_arm64, runner: macos-15, goarch: arm64, toolarch: arm64}
+          - {target: windows_amd64, runner: windows-2025, goarch: amd64, toolarch: x64}
+          - {target: windows_arm64, runner: windows-11-arm, goarch: arm64, toolarch: arm64}
+    runs-on: ${{ matrix.runner }}
+    env:
+      QUALITY_BASE: ${{ github.event.pull_request.base.sha || github.event.before || 'ccca3222f05e5732f7c5a602e0384ac35c444f2f' }}
+      QUALITY_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          set-safe-directory: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.3'
+          architecture: ${{ matrix.goarch }}
+          cache-dependency-path: '**/go.sum'
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14.8'
+          architecture: ${{ matrix.toolarch }}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '26.13.0'
+          architecture: ${{ matrix.toolarch }}
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          artifact-ids: ${{ needs.bundles.outputs.artifact_id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/mulix-bundle-input
+      - name: Required native tests and exact final artifact lifecycle
+        run: |
+          if [[ "$QUALITY_BASE" =~ ^0+$ ]]; then
+            QUALITY_BASE=ccca3222f05e5732f7c5a602e0384ac35c444f2f
+          fi
+          python -I -B scripts/quality.py native --ci \
+            --output "$RUNNER_TEMP/mulix-qualification" \
+            --bundle "$RUNNER_TEMP/mulix-bundle-input/candidate" \
+            --baseline-bundle "$RUNNER_TEMP/mulix-bundle-input/baseline" \
+            --target "$QUALITY_TARGET" --base-ref "$QUALITY_BASE"
+      - name: Preserve evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: qualification-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/mulix-qualification/native-report.json
+            ${{ runner.temp }}/mulix-qualification/source-*.json
+            ${{ runner.temp }}/mulix-qualification/*.cover
+            ${{ runner.temp }}/mulix-qualification/python-tests.json
+            ${{ runner.temp }}/mulix-qualification/commands
+            ${{ runner.temp }}/mulix-qualification/race-diagnostics
+            ${{ runner.temp }}/mulix-qualification/delivery/delivery-report.json
+            ${{ runner.temp }}/mulix-qualification/delivery/commands
+          if-no-files-found: error
+          retention-days: 7
+
+  extended:
+    name: Bounded stress and fuzz
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          set-safe-directory: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.3'
+          cache-dependency-path: '**/go.sum'
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14.8'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '26.13.0'
+      - run: python -I -B scripts/quality.py extended --output "$RUNNER_TEMP/mulix-extended"
+      - if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: extended-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mulix-extended
+          if-no-files-found: error
+          retention-days: 7
+
+  required:
+    name: P1 required
+    if: always()
+    needs: [bundles, native, extended]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          set-safe-directory: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14.8'
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: qualification-*
+          path: ${{ runner.temp }}/mulix-native-evidence
+      - name: Require complete current-source current-bundle native matrix
+        env:
+          QUALITY_NEEDS: ${{ toJSON(needs) }}
+          QUALITY_BUNDLE_HASH: ${{ needs.bundles.outputs.manifest_hash }}
+          QUALITY_EVENT: ${{ github.event_name }}
+        run: |
+          python -I -B scripts/quality.py aggregate \
+            --reports "$RUNNER_TEMP/mulix-native-evidence" \
+            --commit "$GITHUB_SHA" --bundle-hash "$QUALITY_BUNDLE_HASH" \
+            --event "$QUALITY_EVENT"

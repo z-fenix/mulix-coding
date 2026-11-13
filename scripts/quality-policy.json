@@ -1,0 +1,55 @@
+{
+  "schema": "mulix.repository-quality.v1",
+  "tools": {"go": "1.27.3", "python": "3.14.8", "node": "26.13.0"},
+  "targets": ["linux_amd64", "linux_arm64", "darwin_amd64", "darwin_arm64", "windows_amd64", "windows_arm64"],
+  "upgrade_revision": "c50621e0191c51c38573e183c81ab9a193bceb7f",
+  "default_base_revision": "ccca3222f05e5732f7c5a602e0384ac35c444f2f",
+  "required_checks": ["tools", "root-full", "example-full", "root-vet", "example-vet", "python", "coverage", "shell", "parity", "diff", "delivery", "source-stable"],
+  "coverage_floors": {
+    "linux_amd64": {"root": {"covered": 3344, "total": 4127}, "example": {"covered": 86, "total": 119}}
+  },
+  "required_tests": {
+    "all": [
+      "github.com/z-fenix/mulix-coding/internal/quality#TestRunRejectsFalseSuccess",
+      "github.com/z-fenix/mulix-coding/internal/quality#TestRunRejectsOutputOverflowDespiteFailingMappedTest",
+      "github.com/z-fenix/mulix-coding/internal/quality#TestRunRejectsREDWithUnrelatedPackageBuildFailure",
+      "github.com/z-fenix/mulix-coding/internal/quality#TestRunActualProcessRedGreenAndVerification",
+      "github.com/z-fenix/mulix-coding/internal/quality#TestEvidenceVerificationBindsCurrentSourceAndReport",
+      "github.com/z-fenix/mulix-coding/internal/quality#TestContractRejectsIncompleteAndAmbiguousMappings",
+      "github.com/z-fenix/mulix-coding/internal/quality#FuzzAcceptanceBlock",
+      "github.com/z-fenix/mulix-coding/internal/cliutil#TestQualityCLIRealRedGreenVerifyAndStaleEvidence",
+      "github.com/z-fenix/mulix-coding/internal/cliutil#TestQualityCLIInterruptedOrChangedExecutionNeverLeavesPass",
+      "github.com/z-fenix/mulix-coding/internal/cliutil#TestQualityCLICancelledAfterFinalSuiteCannotPersistPass",
+      "github.com/z-fenix/mulix-coding/internal/cliutil#TestQualityCLIVerificationCannotSurviveCorrectivePhaseCycle",
+      "github.com/z-fenix/mulix-coding/internal/fileutil#TestWriteFile_ReplaceFailureKeepsOriginal",
+      "github.com/z-fenix/mulix-coding/internal/fileutil#TestWriteFile_RejectsSymlinkTarget",
+      "github.com/z-fenix/mulix-coding/internal/lockfile#TestLock_MutualExclusionAcrossProcesses",
+      "github.com/z-fenix/mulix-coding/internal/lockfile#TestLock_KilledOwnerReleasesAndFileRemainsReusable",
+      "github.com/z-fenix/mulix-coding/internal/lockfile#TestLock_PreCancelledNeverRunsAndCanRetry",
+      "github.com/z-fenix/mulix-coding/internal/scaffold#TestSessionScriptBinaryInheritsRaceInstrumentation",
+      "github.com/z-fenix/mulix-coding/internal/scaffold#TestInstalledProjectFormalAcceptanceAssets",
+      "github.com/z-fenix/mulix-coding/internal/scaffold#TestUpdateReview_SameFilePartialWriteOutcomes",
+      "github.com/z-fenix/mulix-coding/internal/scaffold#TestUpdateFile_ConflictingChangePreservesLocalAndBaseline",
+      "github.com/z-fenix/mulix-coding/internal/hook#TestDecideContext_WindowsAliasesAndCaseUseSamePolicy",
+      "github.com/z-fenix/mulix-coding/internal/hook#TestDecideContext_WindowsTrailingAliasesNeverReachControlMetadata",
+      "github.com/z-fenix/mulix-coding/internal/sessionctx#TestScratchDir_WindowsRootCaseIsCanonical",
+      "github.com/z-fenix/mulix-coding/internal/scaffold#TestUpdateReview_WindowsPathIdentityProtectsShippedAndOverrides",
+      "github.com/z-fenix/mulix-coding/internal/scaffold#TestUpdateReview_WindowsMetadataPathIdentity"
+    ],
+    "windows": [],
+    "nonwindows": []
+  },
+  "allowed_skips": [
+    {"test": "github.com/z-fenix/mulix-coding/internal/hook#TestDecideContext_WindowsAliasesAndCaseUseSamePolicy", "os": ["linux", "darwin"], "reason": "Windows path identity"},
+    {"test": "github.com/z-fenix/mulix-coding/internal/hook#TestDecideContext_WindowsTrailingAliasesNeverReachControlMetadata", "os": ["linux", "darwin"], "reason": "Windows filename aliases"},
+    {"test": "github.com/z-fenix/mulix-coding/internal/sessionctx#TestScratchDir_WindowsRootCaseIsCanonical", "os": ["linux", "darwin"], "reason": "Windows path identity"},
+    {"test": "github.com/z-fenix/mulix-coding/internal/scaffold#TestUpdateReview_WindowsPathIdentityProtectsShippedAndOverrides", "os": ["linux", "darwin"], "reason": "native Windows path identity"},
+    {"test": "github.com/z-fenix/mulix-coding/internal/scaffold#TestUpdateReview_WindowsMetadataPathIdentity", "os": ["linux", "darwin"], "reason": "native Windows path identity"},
+    {"test": "github.com/z-fenix/mulix-coding/internal/fileutil#TestWriteFile_AppliesRequestedPermissions", "os": ["windows"], "reason": "Windows has no Unix permission bits"},
+    {"test": "github.com/z-fenix/mulix-coding/internal/scaffold#TestInit_ScriptsAreExecutable", "os": ["windows"], "reason": "Windows has no executable permission bit"},
+    {"test": "github.com/z-fenix/mulix-coding/internal/scaffold#TestSessionScripts_BrainstormRejectsRelativeTempRoot", "os": ["windows"], "reason": "Unix TMPDIR semantics"},
+    {"test": "github.com/z-fenix/mulix-coding/internal/cliutil#TestContextCLI_RelativeTempRootProducesNoPath", "os": ["windows"], "reason": "host expands relative temporary roots"},
+    {"test": "github.com/z-fenix/mulix-coding/internal/sessionctx#TestScratchDir_RelativeTempRootIsRejected", "os": ["windows"], "reason": "host expands relative temporary roots"},
+    {"test": "github.com/z-fenix/mulix-coding/internal/scaffold#TestVendorPatches_ResolveContextInsteadOfReadingActive", "os": ["linux", "darwin", "windows"], "reason": "set MULIX_SUPERPOWERS_SOURCE to matching upstream for regeneration proof"}
+  ]
+}

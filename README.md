@@ -505,31 +505,46 @@ works any time `tasks.md` exists and is not gated by `internal/flow`.
 
 ## Development
 
-```
+```bash
 go build ./...
 go vet ./...
-go test ./...
-bash scripts/smoke-e2e.sh    # init + one change through all 7 phases in a
-                              # throwaway git repo (needs git + bash)
-bash scripts/smoke-update.sh # update/rename/conflict/accept (also needs Python 3)
-./scripts/sync-superpowers.sh <superpowers-dir>   # re-vendor superpowers
+go test -count=1 ./...
+go -C examples/todo-cli test -count=1 ./...
+bash scripts/smoke-e2e.sh       # seven phases in a throwaway Git repository
+bash scripts/smoke-sessions.sh  # multi-process sessions and stale-state gates
+bash scripts/smoke-update.sh    # update/rename/conflict/accept; needs Python 3
+bash scripts/sync-superpowers.sh <superpowers-dir>   # re-vendor superpowers
 ```
 
 Module: `github.com/z-fenix/mulix-coding`, Go 1.27.
 
+For the mandatory full/vet/race/Python/coverage/final-artifact suite, use
+[`scripts/quality.py` as documented in docs/quality.md](docs/quality.md).
+It records real exits and raw logs, tests installation/upgrades in private
+prefixes, and rejects unapproved skips or stale source/artifact evidence.
+The pinned-tool six-platform native workflow ends in **P1 required**;
+writing the workflow does not activate remote branch protection.
+
 ## Build, install, release
 
-Shell scripts under `scripts/` — no CI or external tooling required, only
-`git` and a Go toolchain.
+The native developer build needs Bash, Git and Go. The release/installer
+wrappers additionally need Python 3.10+ (standard library only); installing
+an existing verified bundle needs neither Git nor Go.
 
+```bash
+bash scripts/build.sh          # bin/mulix; MULIX_VERSION, git describe, or "dev"
+bash scripts/build.sh test     # developer build + go vet + go test
+bash scripts/release.sh        # six targets in NEW dist/mulix_<version>/
+bash scripts/release.sh --dry-run  # plan only: no build or acceptance evidence
+bash scripts/install.sh --bundle /path/to/bundle --prefix /chosen/bin
+bash scripts/install.sh --source /path/to/checkout --prefix /chosen/bin
 ```
-./scripts/build.sh            # build bin/mulix natively, version stamped
-                              # from MULIX_VERSION, git describe, or "dev"
-./scripts/build.sh test       # build + go vet + go test
-./scripts/install.sh          # clone the repo, compile locally, install to
-                              # ~/.local/bin (--version, --prefix, --source)
-./scripts/release.sh          # cross-compile linux/darwin/windows x
-                              # x86_64/arm64 into dist/ + sha256 checksums
-./scripts/release.sh --dry-run
-```
+
+Release output includes a source/version/architecture-bound manifest and
+checksums. Existing output directories are refused, never cleared. Both
+installation modes stage and version-check before atomic replacement;
+failures preserve the previous executable. Explicit installation without
+`--source`/`--bundle` retains the remote source-clone default to `~/.local/bin`.
+See [quality and delivery boundaries](docs/quality.md) before publishing:
+use the same bundle that passed the native matrix, not a fresh rebuild.
 
