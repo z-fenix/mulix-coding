@@ -209,7 +209,7 @@ class NativeContextTest(unittest.TestCase):
     def test_each_python_scope_must_execute_nonzero_tests(self):
         from unittest import mock
         import uuid
-        scopes = ("scripts/tests", "assets/skills/mulix-verify/tests")
+        scopes = ("scripts/tests", "compat/formal-workbench/tests")
         for empty in scopes:
             with self.subTest(empty=empty), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
@@ -226,7 +226,7 @@ class NativeContextTest(unittest.TestCase):
         import uuid
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            for scope in ("scripts/tests", "assets/skills/mulix-verify/tests"):
+            for scope in ("scripts/tests", "compat/formal-workbench/tests"):
                 path = root / scope
                 path.mkdir(parents=True)
                 (path / ("test_xfail_" + uuid.uuid4().hex + ".py")).write_text("import unittest\nclass Case(unittest.TestCase):\n @unittest.expectedFailure\n def test_failure(self): self.fail('actual expected failure')\n", encoding="utf-8")

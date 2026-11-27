@@ -74,8 +74,11 @@ these mulix specifics:
   state.yaml and appends summaries to `task-N-report.md`; explain relevant
   behavior/output in that same report without overwriting runner summaries.
   `task-done` records structural ledger completion; it does not create runner
-  evidence. For inline completion, pass the applicable `mulix test run` command
-  as its test command; the prior RED still must have run before implementation.
+  evidence. After GREEN/CHECK has executed, close the task with
+  `mulix test receipt --task N`. For inline, pass this read-only command to
+  `task-done` instead of running GREEN/CHECK a second time. A missing or stale
+  receipt blocks completion; explicitly rerun the affected task when needed.
+  Final whole-change execution belongs to `mulix verify`, not task closure.
 - **Step status.** After each step actually runs and its expected result
   is verified, change only its `- [ ]` marker in approved tasks.md to
   `- [X]` (capital X). This status-only edit is allowed. Keep task numbers,

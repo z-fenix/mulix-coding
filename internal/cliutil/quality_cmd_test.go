@@ -95,6 +95,33 @@ func TestQualityCLIRealRedGreenVerifyAndStaleEvidence(t *testing.T) {
 		t.Fatalf("archive: %+v %v", final, err)
 	}
 }
+func TestQualityCLIReceiptIsReadOnlyAndRequiresCurrentInputs(t *testing.T) {
+	root := chdirTemp(t)
+	initMulixRoot(t, root)
+	setupQualityCLI(t, root, "quality")
+	if _, err := runPresetCLI(t, "test", "receipt", "--task", "1"); err == nil {
+		t.Fatal("task without a run returned a receipt")
+	}
+	realTaskEvidence(t, root)
+	file := filepath.Join(root, ".mulix", ".runtime", "quality", "state.yaml")
+	before, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := qualityCommand(t, "test", "receipt", "--task", "1")
+	if !strings.Contains(out, "green") || !strings.Contains(out, "receipt") {
+		t.Fatalf("closure did not identify the verified run: %s", out)
+	}
+	after, err := os.ReadFile(file)
+	if err != nil || string(after) != string(before) {
+		t.Fatalf("receipt lookup modified state: %v", err)
+	}
+	qualityCLIFile(t, root, "value.go", "package fixture\nfunc Value() int {return 5}\n")
+	if _, err := runPresetCLI(t, "test", "receipt", "--task", "1"); err == nil {
+		t.Fatal("stale task receipt closed a changed implementation")
+	}
+}
+
 func TestQualityCLIArchiveFailureReturnsToBuild(t *testing.T) {
 	root := chdirTemp(t)
 	initMulixRoot(t, root)

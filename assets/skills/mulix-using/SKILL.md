@@ -80,8 +80,11 @@ snapshot; a switch affects the next call, not an already-running process.
 ## Runtime artifact policy
 
 - Retained change output is `.mulix/.runtime/<change>/state.yaml`, `specs/`
-  for approved design documents, and `sdd/<plan>/` for execution records.
-  The final verification report is `docs/changes/<change>/report.md`.
+  for approved design documents, `tests/` for authored Karate sources, and
+  `sdd/<plan>/` for execution records. Only build authors `tests/`; use
+  `mulix test run` for task scope and `mulix verify` for final scope. Karate
+  reports and rolling logs stay in scratch. The final verification report
+  is `docs/changes/<change>/report.md`.
 - SDD uses the native files as needed: `plan-path`, `progress.md`,
   `task-N-brief.md`, `task-N-report.md`, `task-N-tests.log`, and
   `review-<base>..<head>.diff`, plus `sdd/.gitignore`. Keep the workspace

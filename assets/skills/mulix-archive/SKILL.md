@@ -5,20 +5,18 @@ description: Use when the active change is in the archive phase, after verificat
 
 # Archive phase
 
-Where the actual project constitution requires the project-scoped formal
-workbench supplement from `mulix-verify`, read the verified report and rerun
-its read-only evidence check against the same contract, results and
-independently verified deployed revision before finishing/integration.
-Missing formal evidence, drift or unresolved blockers stop integration; do
-not author missing evidence in archive. The helper checks integrity, not
-human consent or business truth, and does not replace the current native
-verification receipt or the explicit human integration decision below.
+Check the current verification receipt and the verified report. If the
+project constitution names an additional delivery gate, confirm its recorded
+evidence is current using that project's procedure. Stop on missing evidence,
+input drift or unresolved blockers; return to the phase that owns the fix.
+Project-specific evidence supplements the native receipt and does not replace
+the human integration decision below.
 
-**REQUIRED SUB-SKILL:** invoke `finishing-a-development-branch` and
-follow it: verify the suite is green, detect the environment, present
-its menu exactly as written (merge locally / push and open a PR / keep
-as-is — discarding only on an explicit request), and carry out the
-human's choice.
+**REQUIRED SUB-SKILL:** invoke `finishing-a-development-branch` for its
+branch options and integration steps. Its test gate uses the current Mulix
+verification receipt; do not rerun an unchanged suite for closure. Present
+its menu (merge locally / push and open a PR / keep as-is — discarding only
+on an explicit request) and carry out the human's choice.
 
 Do not author project files in this phase. Claude Code's PreToolUse
 hook checks `Write`/`Edit`, not Bash, MCP, NotebookEdit or other writers;

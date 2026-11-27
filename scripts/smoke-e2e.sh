@@ -190,6 +190,8 @@ mulix state transition tasks-complete >/dev/null
 step build
 expect_hook allow "src/main.go"
 expect_hook allow ".mulix/.runtime/$c/sdd/tasks/task-1-report.md"
+expect_hook allow ".mulix/.runtime/$c/tests/features/task-1/api.feature"
+expect_hook deny ".mulix/.runtime/$c/tests/features/task-1/run.json"
 expect_hook allow "$scratch/verification/tests.log"
 expect_hook deny ".mulix/.runtime/$c/verification/tests.log"
 expect_hook deny ".mulix/.runtime/$c/migrations/manifest.json"
@@ -226,7 +228,11 @@ bash "$done_script" "docs/changes/$c/tasks.md" 1 "$base" -- bash -c 'printf "exp
 test ! -f "$ws/progress.md"
 cmp "$work/brief-before.md" "$ws/task-1-brief.md"
 grep -q 'expected failure' "$ws/task-1-tests.log"
-bash "$done_script" "docs/changes/$c/tasks.md" 1 "$base" -- mulix test run --task 1 --stage green >/dev/null
+mulix test run --task 1 --stage green >/dev/null
+state_file=".mulix/.runtime/$c/state.yaml"
+before_receipt=$(git hash-object --no-filters "$state_file")
+bash "$done_script" "docs/changes/$c/tasks.md" 1 "$base" -- mulix test receipt --task 1 >/dev/null
+[ "$before_receipt" = "$(git hash-object --no-filters "$state_file")" ]
 # Compare the entire refreshed brief, not just the presence of an X marker.
 cat > "$work/brief-expected.md" <<'EOF'
 ## Task 1: Greeter
@@ -270,7 +276,10 @@ func TestGreetingCLI(t *testing.T) {
 EOF
 mulix test run --task 2 --stage red >/dev/null
 printf 'package main\nimport "fmt"\nfunc main(){fmt.Print("hello")}\n' > cmd/greet/main.go
-bash .claude/skills/executing-plans/scripts/task-done "docs/changes/$c/tasks.md" 2 "$base" -- mulix test run --task 2 --stage green >/dev/null
+mulix test run --task 2 --stage green >/dev/null
+before_receipt=$(git hash-object --no-filters "$state_file")
+bash .claude/skills/executing-plans/scripts/task-done "docs/changes/$c/tasks.md" 2 "$base" -- mulix test receipt --task 2 >/dev/null
+[ "$before_receipt" = "$(git hash-object --no-filters "$state_file")" ]
 mulix state transition build-complete >/dev/null
 
 step verify
@@ -308,8 +317,10 @@ mulix state transition archived >/dev/null
 test ! -f .mulix/active
 
 step "retained runtime inventory"
+test -d ".mulix/.runtime/$c/tests"
+[ -z "$(find ".mulix/.runtime/$c/tests" -mindepth 1 -print)" ] # non-Karate fixture creates only the empty source directory
 while IFS= read -r dir; do
-  case "$(basename "$dir")" in specs|sdd) ;; *) printf 'FAIL: extra runtime directory %s\n' "$dir" >&2; exit 1 ;; esac
+  case "$(basename "$dir")" in specs|tests|sdd) ;; *) printf 'FAIL: extra runtime directory %s\n' "$dir" >&2; exit 1 ;; esac
 done < <(find ".mulix/.runtime/$c" -mindepth 1 -maxdepth 1 -type d)
 
 step "legacy git hygiene"

@@ -44,16 +44,18 @@ type Case struct {
 	File      string `yaml:"file" json:"file"`
 }
 type Contract struct {
-	Criteria []Criterion `yaml:"criteria" json:"criteria"`
-	Tasks    []Task      `yaml:"tasks" json:"tasks"`
-	Cases    []Case      `yaml:"cases" json:"cases"`
+	Criteria    []Criterion `yaml:"criteria" json:"criteria"`
+	Tasks       []Task      `yaml:"tasks" json:"tasks"`
+	Cases       []Case      `yaml:"cases" json:"cases"`
+	VerifyCases []Case      `yaml:"verify_cases,omitempty" json:"verify_cases,omitempty"`
 }
 type Suite struct {
-	ID             string   `yaml:"id" json:"id"`
-	Command        []string `yaml:"command" json:"command"`
-	CWD            string   `yaml:"cwd" json:"cwd"`
-	Format         string   `yaml:"format" json:"format"`
-	TimeoutSeconds int      `yaml:"timeout_seconds" json:"timeout_seconds"`
+	ID             string        `yaml:"id" json:"id"`
+	Command        []string      `yaml:"command,omitempty" json:"command,omitempty"`
+	CWD            string        `yaml:"cwd,omitempty" json:"cwd,omitempty"`
+	Format         string        `yaml:"format" json:"format"`
+	TimeoutSeconds int           `yaml:"timeout_seconds" json:"timeout_seconds"`
+	Karate         *KaratePolicy `yaml:"karate,omitempty" json:"karate,omitempty"`
 }
 type Policy struct {
 	Schema string  `yaml:"schema" json:"schema"`
@@ -206,14 +208,16 @@ func LoadContract(p Project) (Contract, error) {
 		return c, err
 	}
 	var matrix struct {
-		Tasks []Task `yaml:"tasks"`
-		Cases []Case `yaml:"cases"`
+		Tasks       []Task `yaml:"tasks"`
+		Cases       []Case `yaml:"cases"`
+		VerifyCases []Case `yaml:"verify_cases"`
 	}
 	if err := Block(data, "mulix-tests", &matrix); err != nil {
 		return c, err
 	}
 	c.Tasks = matrix.Tasks
 	c.Cases = matrix.Cases
+	c.VerifyCases = matrix.VerifyCases
 	numbers := TaskNumbers(string(data))
 	if len(c.Tasks) == 0 || len(c.Tasks) != len(numbers) {
 		return c, fmt.Errorf("test matrix tasks must match all Task headings")
@@ -241,17 +245,20 @@ func LoadContract(p Project) (Contract, error) {
 	for _, a := range c.Criteria {
 		known[a.ID] = true
 	}
-	for _, tc := range c.Cases {
+	for i, tc := range c.SelectedCases(0) {
+		final := i >= len(c.Cases)
 		if !casePattern.MatchString(tc.ID) || ids[tc.ID] {
 			return c, fmt.Errorf("invalid or duplicate test case %q", tc.ID)
 		}
 		ids[tc.ID] = true
-		if !known[tc.Criterion] || taskKinds[tc.Task] == "" {
-			return c, fmt.Errorf("case %s has an unknown criterion or task", tc.ID)
+		if !known[tc.Criterion] || (final && tc.Task != 0) || (!final && taskKinds[tc.Task] == "") {
+			return c, fmt.Errorf("case %s has an unknown criterion or invalid task ownership", tc.ID)
 		}
-		for _, text := range []string{tc.Point, tc.Given, tc.When, tc.Then} {
-			if !concrete(text) {
-				return c, fmt.Errorf("case %s needs a concrete point, precondition, action and expectation", tc.ID)
+		if !final {
+			for _, text := range []string{tc.Point, tc.Given, tc.When, tc.Then} {
+				if !concrete(text) {
+					return c, fmt.Errorf("case %s needs a concrete point, precondition, action and expectation", tc.ID)
+				}
 			}
 		}
 		// Exact emitted names and physical paths are identifiers, not prose:
@@ -261,14 +268,16 @@ func LoadContract(p Project) (Contract, error) {
 				return c, fmt.Errorf("case %s needs a suite, exact test identity and test file", tc.ID)
 			}
 		}
-		if excluded(p, tc.File) {
-			return c, fmt.Errorf("case %s maps a workflow output instead of a test input: %s", tc.ID, tc.File)
+		if (final || excluded(p, tc.File)) && !karateCasePath(p, tc, final) {
+			return c, fmt.Errorf("case %s must map an owned Karate feature or ordinary project test input, not other runtime output", tc.ID)
 		}
 		if _, err := fileutil.ControlPath(p.Root, tc.File, false); err != nil {
 			return c, err
 		}
-		covered[tc.Criterion] = true
-		taskCovered[tc.Task] = true
+		if !final {
+			covered[tc.Criterion] = true
+			taskCovered[tc.Task] = true
+		}
 	}
 	for _, a := range c.Criteria {
 		if !covered[a.ID] {
@@ -321,16 +330,19 @@ func LoadPolicy(root string) (Policy, error) {
 		return p, fmt.Errorf("quality policy needs schema mulix.quality.v1 and at least one suite")
 	}
 	seen := map[string]bool{}
+	karate := false
 	for i := range p.Suites {
 		s := &p.Suites[i]
-		if !regexpSuiteID.MatchString(s.ID) || seen[s.ID] || len(s.Command) == 0 || strings.TrimSpace(s.Command[0]) == "" {
-			return p, fmt.Errorf("suite needs unique id and non-empty argv")
+		if !validSuite(*s) || seen[s.ID] {
+			return p, fmt.Errorf("invalid suite %q: use Go/JSON argv or a typed Karate version and SHA-256", s.ID)
 		}
 		seen[s.ID] = true
-		if s.Format != "go-json" && s.Format != "json" {
-			return p, fmt.Errorf("suite %s format must be go-json or json", s.ID)
-		}
-		if _, err := SafeDir(root, s.CWD); err != nil {
+		if s.Format == KarateFormat {
+			if karate {
+				return p, fmt.Errorf("only one Karate suite may own the change's tests directory")
+			}
+			karate = true
+		} else if _, err := SafeDir(root, s.CWD); err != nil {
 			return p, err
 		}
 		if s.TimeoutSeconds < 0 || s.TimeoutSeconds > 7200 {
@@ -351,9 +363,12 @@ func (c Contract) Task(number int) (Task, bool) {
 	return Task{}, false
 }
 func (c Contract) SelectedCases(task int) []Case {
+	if task == 0 {
+		return append(append([]Case(nil), c.Cases...), c.VerifyCases...)
+	}
 	var out []Case
 	for _, tc := range c.Cases {
-		if task == 0 || tc.Task == task {
+		if tc.Task == task {
 			out = append(out, tc)
 		}
 	}

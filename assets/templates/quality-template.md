@@ -32,6 +32,43 @@ Formats:
   failures must exit nonzero. Send diagnostic prose to stderr. Adapt the real
   framework's result stream, not an unconditional echo or a summary string.
 
+### Opt-in Karate RC1 suite
+
+```yaml
+schema: mulix.quality.v1
+suites:
+  - id: karate
+    format: karate-jsonl
+    timeout_seconds: 300
+    karate:
+      version: 2.1.5.RC1
+      sha256: 9e5fc19c560fa6824aae07a52ec8ca11542ecf6e93bd9f823b039477525cf9e3
+      environment: qa
+      env: [APP_BASE_URL]
+```
+
+Supply the reviewed JAR as an absolute `MULIX_KARATE_JAR` path. The runner
+uses Java 21+ from PATH or an absolute `MULIX_KARATE_JAVA` installation binary;
+it checks the JDK's `release` metadata without launching Java to check a
+receipt. `karate.environment` and `karate.env` are optional. List only the
+project environment variable names the test needs; provide values separately.
+Mulix owns argv, cwd and output paths for this format. It never downloads a JAR.
+
+Use `.mulix/.runtime/<change>/tests/features/task-N/` for that task's `.feature`
+entries, `features/final/` for final-only entries, and `helpers/` for reusable
+`.feature`/`.js`, optionally including `helpers/karate-config.js`. Feature
+includes can use `this:../../helpers/...` from a directly nested task entry.
+Keep reports, logs, credentials and the JAR out of `tests/`.
+
+For each case, put its root-relative source in `file` and
+`<file>#<exact scenario name>` in `test` (use the expanded Outline name).
+Declare final-only mandatory cases under `verify_cases` in the same
+`mulix-tests` block: use `id`, `criterion`, `suite`, `file`, and `test`, without
+`task`. Task commands use only the mapped task's entries; final verification
+runs all task and final entries, not helpers as standalone cases. It also runs
+all other configured mandatory suites. Read the produced JSONL evidence; a zero
+exit on a dry run, empty scope, or skipped required scenario is not PASS.
+
 All suites require executed, non-skipped tests; mapped tests must be present and
 not skipped. Missing/malformed/duplicate results, inconsistent exit codes and
 infrastructure failures fail closed. Unmapped skips are counted and reported;

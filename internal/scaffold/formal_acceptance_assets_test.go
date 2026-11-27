@@ -1,7 +1,7 @@
 package scaffold
 
 import (
-	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,77 +17,76 @@ func TestInstalledProjectFormalAcceptanceAssets(t *testing.T) {
 			if _, err := Init(InitOptions{Root: root, Hosts: []Host{host}}); err != nil {
 				t.Fatal(err)
 			}
-			read := func(relative string) string {
-				t.Helper()
-				data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relative)))
+			skills := host.skillsDir()
+			for _, rel := range []string{
+				skills + "/mulix-verify/references/acceptance-gate.md",
+				skills + "/mulix-verify/scripts/check-acceptance.py",
+				skills + "/mulix-verify/tests/test_acceptance_gate.py",
+				".mulix/templates/acceptance-contract-template.json",
+				".mulix/templates/acceptance-results-template.json",
+			} {
+				if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(rel))); !os.IsNotExist(err) {
+					t.Errorf("default install must not ship %s: %v", rel, err)
+				}
+			}
+			for _, dir := range []string{skills, ".mulix/templates"} {
+				err := filepath.WalkDir(filepath.Join(root, filepath.FromSlash(dir)), func(full string, d fs.DirEntry, err error) error {
+					if err != nil || d.IsDir() || filepath.Ext(full) != ".md" {
+						return err
+					}
+					data, err := os.ReadFile(full)
+					if err != nil {
+						return err
+					}
+					for _, forbidden := range []string{"../pm/Product-Spec.md", "完整测试点与测试用例.md", "requirements/case/", "cases.json", "--workbench-root ../test", "reports/case-live", "check-acceptance.py", SkillsDirPlaceholder} {
+						if strings.Contains(string(data), forbidden) {
+							t.Errorf("%s carries project-specific input %q", full, forbidden)
+						}
+					}
+					return nil
+				})
 				if err != nil {
 					t.Fatal(err)
 				}
-				return string(data)
 			}
-			skills := host.skillsDir()
-			for relative, required := range map[string][]string{
-				".mulix/templates/constitution-template.md":            {"Acceptance Authority & Evidence", "Evidence levels"},
-				".mulix/templates/spec-template.md":                    {"Acceptance Baseline & Scope", "Formal Acceptance Mapping", "mulix-acceptance"},
-				".mulix/templates/tasks-template.md":                   {"Acceptance & Release Gates", "Acceptance Contract", "Implementation status", "Acceptance status", "mulix-tests"},
-				skills + "/mulix-specify/SKILL.md":                     {"Formal Acceptance Mapping", "mulix-acceptance"},
-				skills + "/mulix-tasks/SKILL.md":                       {"Acceptance contract", "mulix-tests", "mulix test run"},
-				skills + "/mulix-verify/SKILL.md":                      {"project-scoped", "check-acceptance.py", "mulix verify", "mulix-review"},
-				skills + "/mulix-archive/SKILL.md":                     {"project-scoped", "mulix verify", "current verification receipt"},
-				skills + "/mulix-verify/references/acceptance-gate.md": {"适用范围", skills + "/mulix-verify/scripts/check-acceptance.py"},
-				skills + "/mulix-verify/scripts/check-acceptance.py":   {"def check_acceptance(", "EVIDENCE_CHECK_BLOCKED"},
-				skills + "/mulix-verify/tests/test_acceptance_gate.py": {"class AcceptanceGateTest", "test_native_execution_before_scope_review_is_rejected"},
+			for path, fence := range map[string]string{
+				".mulix/templates/spec-template.md":  "mulix-acceptance",
+				".mulix/templates/tasks-template.md": "mulix-tests",
+				skills + "/mulix-verify/SKILL.md":    "mulix-review",
 			} {
-				content := read(relative)
-				for _, expected := range required {
-					if !strings.Contains(content, expected) {
-						t.Errorf("%s is missing %q", relative, expected)
-					}
-				}
-				if strings.Contains(content, SkillsDirPlaceholder) {
-					t.Errorf("%s retains an unresolved host placeholder", relative)
+				var block map[string]any
+				if err := quality.Block([]byte(readProjectFile(t, root, path)), fence, &block); err != nil {
+					t.Errorf("%s lost its native %s block: %v", path, fence, err)
 				}
 			}
-
-			var criteria, matrix map[string]any
-			if err := quality.Block([]byte(read(".mulix/templates/spec-template.md")), "mulix-acceptance", &criteria); err != nil {
-				t.Error("native acceptance fence must remain unique:", err)
-			}
-			if err := quality.Block([]byte(read(".mulix/templates/tasks-template.md")), "mulix-tests", &matrix); err != nil {
-				t.Error("native test matrix fence must remain unique:", err)
-			}
-			verify := read(skills + "/mulix-verify/SKILL.md")
-			if strings.Contains(verify, "mulix state set verify_result") {
-				t.Error("project evidence supplement must not restore manual native verification results")
-			}
-			if host == HostDSH && strings.Contains(read(skills+"/mulix-verify/references/acceptance-gate.md"), ".claude/skills/") {
-				t.Error("DSH installation must not point to Claude's skills directory")
-			}
-
-			var contract struct {
-				AcceptanceLevel string            `json:"acceptance_level"`
-				BlockingItems   []json.RawMessage `json:"blocking_items"`
-			}
-			if err := json.Unmarshal([]byte(read(".mulix/templates/acceptance-contract-template.json")), &contract); err != nil {
-				t.Fatal(err)
-			}
-			if contract.AcceptanceLevel != "FORMAL" || len(contract.BlockingItems) == 0 {
-				t.Error("unreviewed formal acceptance template must remain blocked")
-			}
-			var results struct {
-				Blockers []json.RawMessage `json:"blockers"`
-				Cases    []struct {
-					Checkpoints []struct {
-						Status string `json:"status"`
-					} `json:"checkpoints"`
-				} `json:"cases"`
-			}
-			if err := json.Unmarshal([]byte(read(".mulix/templates/acceptance-results-template.json")), &results); err != nil {
-				t.Fatal(err)
-			}
-			if len(results.Blockers) == 0 || len(results.Cases) == 0 || len(results.Cases[0].Checkpoints) == 0 || results.Cases[0].Checkpoints[0].Status != "NOT_RUN" {
-				t.Error("unexecuted results template must retain blockers and NOT_RUN")
+			verify := readProjectFile(t, root, skills+"/mulix-verify/SKILL.md")
+			if !strings.Contains(verify, "mulix verify") || strings.Contains(verify, "mulix state set verify_result") {
+				t.Error("verification must use the native runner rather than hand-written success")
 			}
 		})
+	}
+}
+
+func TestUpdateRetiresProjectSpecificAcceptanceAssets(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Init(InitOptions{Root: root, Hosts: []Host{HostClaude, HostDSH}}); err != nil {
+		t.Fatal(err)
+	}
+	const pure = ".claude/skills/mulix-verify/scripts/check-acceptance.py"
+	const local = ".dsh/skills/mulix-verify/scripts/check-acceptance.py"
+	for _, rel := range []string{pure, local} {
+		writeProjectFile(t, root, rel, "old vendor checker\n")
+		writeProjectFile(t, root, ".mulix/.installed/"+rel, "old vendor checker\n")
+		recordVendorForTest(t, root, rel, "old vendor checker\n")
+	}
+	writeProjectFile(t, root, local, "project-owned rules\n")
+	if _, err := Update(UpdateOptions{Root: root}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(pure))); !os.IsNotExist(err) {
+		t.Errorf("unmodified retired vendor file must be removed: %v", err)
+	}
+	if got := readProjectFile(t, root, local); got != "project-owned rules\n" {
+		t.Errorf("customized retired file changed: %q", got)
 	}
 }

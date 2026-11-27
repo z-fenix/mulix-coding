@@ -17,26 +17,33 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/z-fenix/mulix-coding/internal/layout"
 )
 
 type TestResult struct {
-	Name   string `yaml:"name" json:"name"`
-	Status string `yaml:"status" json:"status"`
+	Name      string `yaml:"name" json:"name"`
+	Status    string `yaml:"status" json:"status"`
+	Assertion bool   `yaml:"assertion,omitempty" json:"assertion,omitempty"`
 }
 type SuiteResult struct {
-	ID           string       `yaml:"id" json:"id"`
-	Command      []string     `yaml:"command" json:"command"`
-	CWD          string       `yaml:"cwd" json:"cwd"`
-	Format       string       `yaml:"format" json:"format"`
-	ExitCode     int          `yaml:"exit_code" json:"exit_code"`
-	Passed       int          `yaml:"passed" json:"passed"`
-	Failed       int          `yaml:"failed" json:"failed"`
-	Skipped      int          `yaml:"skipped" json:"skipped"`
-	Tests        []TestResult `yaml:"tests" json:"tests"`
-	StdoutDigest string       `yaml:"stdout_sha256" json:"stdout_sha256"`
-	StderrDigest string       `yaml:"stderr_sha256" json:"stderr_sha256"`
-	Output       string       `yaml:"output,omitempty" json:"output,omitempty"`
-	Error        string       `yaml:"error,omitempty" json:"error,omitempty"`
+	ID             string       `yaml:"id" json:"id"`
+	Command        []string     `yaml:"command" json:"command"`
+	CWD            string       `yaml:"cwd" json:"cwd"`
+	Format         string       `yaml:"format" json:"format"`
+	ExitCode       int          `yaml:"exit_code" json:"exit_code"`
+	Passed         int          `yaml:"passed" json:"passed"`
+	Failed         int          `yaml:"failed" json:"failed"`
+	Skipped        int          `yaml:"skipped" json:"skipped"`
+	Tests          []TestResult `yaml:"tests" json:"tests"`
+	StdoutDigest   string       `yaml:"stdout_sha256" json:"stdout_sha256"`
+	StderrDigest   string       `yaml:"stderr_sha256" json:"stderr_sha256"`
+	Output         string       `yaml:"output,omitempty" json:"output,omitempty"`
+	Error          string       `yaml:"error,omitempty" json:"error,omitempty"`
+	FeatureFiles   []string     `yaml:"feature_files,omitempty" json:"feature_files,omitempty"`
+	KarateIdentity string       `yaml:"karate_identity,omitempty" json:"karate_identity,omitempty"`
+	KarateSources  string       `yaml:"karate_sources,omitempty" json:"karate_sources,omitempty"`
+	EventDigest    string       `yaml:"events_sha256,omitempty" json:"events_sha256,omitempty"`
 }
 type RunRecord struct {
 	ID                string        `yaml:"id" json:"id"`
@@ -165,15 +172,31 @@ func parseResults(data []byte, format string) ([]TestResult, error) {
 	slices.SortFunc(out, func(a, b TestResult) int { return strings.Compare(a.Name, b.Name) })
 	return out, nil
 }
-func executeSuite(ctx context.Context, p Project, s Suite, scratch, runID string) SuiteResult {
+func executeSuite(ctx context.Context, p Project, c Contract, s Suite, task int, scratch, runID string, snapshot Snapshot) SuiteResult {
 	r := SuiteResult{ID: s.ID, Command: append([]string(nil), s.Command...), CWD: s.CWD, Format: s.Format, ExitCode: -1}
 	fail := func(err error) SuiteResult { r.Error = err.Error(); return r }
-	cwd, err := SafeDir(p.Root, s.CWD)
-	if err != nil {
-		return fail(err)
-	}
 	if err := os.MkdirAll(scratch, 0700); err != nil {
 		return fail(err)
+	}
+	var inv karateInvocation
+	var cwd string
+	var err error
+	argv := s.Command
+	if s.Format == KarateFormat {
+		inv, err = prepareKarate(p, c, s, task, scratch, runID)
+		if err != nil {
+			return fail(err)
+		}
+		if inv.Identity != snapshot.Karate || inv.KarateSources != snapshot.KarateSources {
+			return fail(fmt.Errorf("staged Karate engine or source inputs differ from the pre-run snapshot"))
+		}
+		argv, cwd = inv.Argv, inv.Dir
+		r.FeatureFiles, r.KarateIdentity, r.KarateSources = inv.Features, inv.Identity, inv.KarateSources
+	} else {
+		cwd, err = SafeDir(p.Root, s.CWD)
+		if err != nil {
+			return fail(err)
+		}
 	}
 	stdout, err := os.OpenFile(filepath.Join(scratch, runID+"-"+s.ID+"-stdout.log"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
@@ -191,8 +214,11 @@ func executeSuite(ctx context.Context, p Project, s Suite, scratch, runID string
 	}
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(seconds)*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(runCtx, s.Command[0], s.Command[1:]...)
+	cmd := exec.CommandContext(runCtx, argv[0], argv[1:]...)
 	cmd.Dir = cwd
+	if s.Format == KarateFormat {
+		cmd.Env = inv.Env
+	}
 	cmd.WaitDelay = 2 * time.Second
 	stdoutCapture := &boundedFile{file: stdout, left: outputLimit}
 	stderrCapture := &boundedFile{file: stderr, left: outputLimit}
@@ -234,13 +260,18 @@ func executeSuite(ctx context.Context, p Project, s Suite, scratch, runID string
 	}
 	r.StdoutDigest = Digest(out)
 	r.StderrDigest = Digest(errOut)
-	// Keep a bounded excerpt as well as stream digests in the retained record.
-	excerpt := append(append([]byte(nil), out...), errOut...)
-	if len(excerpt) > 4096 {
-		excerpt = excerpt[len(excerpt)-4096:]
+	if s.Format == KarateFormat {
+		// Keep raw output in private scratch; HTTP traces can contain input data.
+		r.Tests, r.EventDigest, err = readKarateEvents(p, inv)
+	} else {
+		// Legacy suites preserve a bounded excerpt alongside stream digests.
+		excerpt := append(append([]byte(nil), out...), errOut...)
+		if len(excerpt) > 4096 {
+			excerpt = excerpt[len(excerpt)-4096:]
+		}
+		r.Output = string(excerpt)
+		r.Tests, err = parseResults(out, s.Format)
 	}
-	r.Output = string(excerpt)
-	r.Tests, err = parseResults(out, s.Format)
 	if err != nil {
 		return fail(err)
 	}
@@ -280,16 +311,23 @@ func validateStage(c Contract, task int, stage string) error {
 	return nil
 }
 func ValidateMapping(c Contract, p Policy) error {
-	known := map[string]bool{}
+	known := map[string]string{}
+	karate := false
 	for _, s := range p.Suites {
-		if !regexpSuiteID.MatchString(s.ID) || known[s.ID] || len(s.Command) == 0 || s.Command[0] == "" || (s.Format != "go-json" && s.Format != "json") {
+		if !validSuite(s) || known[s.ID] != "" || (s.Format == KarateFormat && karate) {
 			return fmt.Errorf("invalid suite %q", s.ID)
 		}
-		known[s.ID] = true
+		known[s.ID] = s.Format
+		karate = karate || s.Format == KarateFormat
 	}
-	for _, tc := range c.Cases {
-		if !known[tc.Suite] {
+	for _, tc := range c.SelectedCases(0) {
+		format := known[tc.Suite]
+		if format == "" {
 			return fmt.Errorf("case %s references unknown suite %s", tc.ID, tc.Suite)
+		}
+		runtimeInput := strings.HasPrefix(strings.ToLower(tc.File), layout.RuntimeDir+"/")
+		if (format == KarateFormat) != runtimeInput || (tc.Task == 0 && format != KarateFormat) {
+			return fmt.Errorf("case %s: change-owned runtime test files are only valid in a Karate suite", tc.ID)
 		}
 	}
 	return nil
@@ -303,6 +341,11 @@ func outcome(c Contract, r RunRecord) error {
 	for _, suite := range r.Suites {
 		if suite.Error != "" {
 			return fmt.Errorf("%s: %s", suite.ID, suite.Error)
+		}
+		if suite.Format == KarateFormat && (suite.KarateIdentity == "" || suite.KarateIdentity != r.Snapshot.Karate ||
+			!fullSHA256.MatchString(suite.KarateSources) || suite.KarateSources != r.Snapshot.KarateSources ||
+			len(suite.FeatureFiles) == 0 || !fullSHA256.MatchString(suite.EventDigest)) {
+			return fmt.Errorf("suite %s lacks source-bound Karate execution evidence", suite.ID)
 		}
 		if _, ok := results[suite.ID]; ok {
 			return fmt.Errorf("duplicate suite receipt %s", suite.ID)
@@ -318,6 +361,9 @@ func outcome(c Contract, r RunRecord) error {
 			case "pass":
 				passed++
 			case "fail":
+				if r.Stage == "red" && suite.Format == KarateFormat && !test.Assertion {
+					return fmt.Errorf("Karate scenario %s failed without a linked assertion; not a behavioral RED", test.Name)
+				}
 				failed++
 			case "skip":
 				skipped++
@@ -387,7 +433,7 @@ func Run(ctx context.Context, p Project, c Contract, policy Policy, task int, st
 	if err = ValidateMapping(c, policy); err != nil {
 		return record, err
 	}
-	record.Snapshot, err = Fingerprint(p, c, task)
+	record.Snapshot, err = ExecutionFingerprint(p, c, task)
 	if err != nil {
 		return record, err
 	}
@@ -399,12 +445,12 @@ func Run(ctx context.Context, p Project, c Contract, policy Policy, task int, st
 		if task != 0 && !selected[suite.ID] {
 			continue
 		}
-		record.Suites = append(record.Suites, executeSuite(ctx, p, suite, scratch, record.ID))
+		record.Suites = append(record.Suites, executeSuite(ctx, p, c, suite, task, scratch, record.ID, record.Snapshot))
 		if err = ctx.Err(); err != nil {
 			return record, err
 		}
 	}
-	after, e := Fingerprint(p, c, task)
+	after, e := ExecutionFingerprint(p, c, task)
 	if e != nil {
 		return record, e
 	}

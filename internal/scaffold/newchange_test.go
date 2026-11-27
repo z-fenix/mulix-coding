@@ -32,7 +32,11 @@ func TestCreateChangeDirAt_DateIDAndCollision(t *testing.T) {
 		if nc.SpecDir != "docs/specs/"+want || nc.ChangeDir != "docs/changes/"+want || nc.RuntimeDir != ".mulix/.runtime/"+want {
 			t.Fatalf("inconsistent directories: %+v", nc)
 		}
-		for _, rel := range []string{nc.SpecDir, nc.ChangeDir, nc.RuntimeDir} {
+		runtimeEntries, err := os.ReadDir(filepath.Join(root, filepath.FromSlash(nc.RuntimeDir)))
+		if err != nil || len(runtimeEntries) != 1 || runtimeEntries[0].Name() != "tests" || !runtimeEntries[0].IsDir() {
+			t.Fatalf("runtime should start with only its tests directory: %v, %v", runtimeEntries, err)
+		}
+		for _, rel := range []string{nc.SpecDir, nc.ChangeDir, nc.RuntimeDir + "/tests"} {
 			entries, err := os.ReadDir(filepath.Join(root, filepath.FromSlash(rel)))
 			if err != nil || len(entries) != 0 {
 				t.Fatalf("new directory not empty: %s, %v", rel, err)

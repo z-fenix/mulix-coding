@@ -57,7 +57,9 @@ the approved design doc in `specs/`, and the native execution workspace in
 the executor. These records support recovery and build guards; they are not
 removed at the end of execution.
 
-The only new per-change runtime directories are **`specs/` and `sdd/`**.
+The retained per-change runtime directories are **`specs/`, `tests/` and
+`sdd/`**. New changes start with an empty `tests/`; it holds only authored
+Karate `.feature` entries and helpers, with no JAR, runtime reports or logs.
 Visual-companion sessions, diagnostic material, ad-hoc RED/rerun logs,
 verification tooling, relocation manifests and build binaries use private,
 context-scoped system scratch instead. Necessary command/output summaries
@@ -67,6 +69,13 @@ change, the CLI-owned `state.yaml`, and archived changes. Historical
 `brainstorm/`, `verification/`, `migrations/`, and `_shared/` data is preserved,
 not silently cleaned by init/update; legacy ignore rules continue to protect
 old session keys.
+
+Projects that opt into Karate use the `karate-jsonl` suite described in the
+[quality policy template](assets/templates/quality-template.md). Task runs
+select only their owned feature entries; `mulix verify` runs every task and
+final-only entry plus the other mandatory suites. `mulix test receipt` checks
+an existing task result without launching another test run. Supply the pinned
+RC1 JAR separately; `init` and `update` do not install Java or a JAR.
 
 New changes use a local-calendar-date ID, for example
 `2026-10-14-add-login`. The spec, change, and runtime directories share
@@ -85,7 +94,8 @@ Two mechanisms provide workflow control from that state:
    every project-configured mandatory suite and binds the reviewed report.
 2. **The PreToolUse hook** (`mulix hook`) checks Claude Code's
    `Write`/`Edit` calls against the phase whitelist, including runtime
-   subdirectories (design: `specs/`; build: `sdd/`). Transient output is
+   subdirectories (design: `specs/`; build: `sdd/` and authored `tests/`
+   files). Transient output is
    scoped to the resolved scratch directory: design writes `brainstorm/`,
    build/verify write `verification/` or `migrations/`, and diagnostics use
    `diagnosing-superpowers/` in any phase. Raw
@@ -108,6 +118,9 @@ agents follow phase discipline, while CLI transitions run guards.
 `flow.Table.GuardRefs` is the single source of readiness checks. Guards consume
 CLI-generated execution receipts rather than handwritten pass claims. They do
 not authenticate reviewer consent or prove assertions match product intent.
+Additional project gates come from the project's constitution. Projects using
+the former bundled checker must follow the
+[optional compatibility migration](compat/formal-workbench/README.md) before updating.
 `state transition --force --reason "recovery explanation"` records readiness
 bypasses, never makes an illegal phase/event legal and never creates test
 qualification. Neither hook nor local receipts authenticate a writer controlling
@@ -197,7 +210,11 @@ it for mulix projects so its bootstrap and namespaced copies don't
 compete with the phase gates.
 
 `scripts/sync-superpowers.sh <superpowers-dir>` regenerates the vendored
-copy. It rewrites `superpowers:<skill>` references to the unprefixed
+copy. The current source pin is `v7.0.2` at
+`22f0b463e7a5e579904dd6211a520321035526f7`; use that clean checkout for
+release verification. The script stages the generated files and checks all
+patches before replacing the embedded tree. It rewrites
+`superpowers:<skill>` references to the unprefixed
 names, moves retained design/SDD output under `.mulix/.runtime/`, directs
 transient companion/diagnosis material to system scratch (the scripts resolve
 paths through `mulix context show`), and applies a small set

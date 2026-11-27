@@ -3,7 +3,7 @@ package quality
 import (
 	"fmt"
 	"path"
-	"reflect"
+	"slices"
 	"strings"
 )
 
@@ -28,41 +28,62 @@ func validReceipt(c Contract, r RunRecord) error {
 }
 func ValidateTaskEvidence(p Project, c Contract, records []RunRecord) error {
 	for _, task := range c.Tasks {
-		current, err := Fingerprint(p, c, task.Number)
-		if err != nil {
+		if _, err := taskEvidence(p, c, records, task, false); err != nil {
 			return err
-		}
-		stage := "check"
-		if task.Kind == "code" {
-			stage = "green"
-		}
-		green, ok := Latest(records, task.Number, stage)
-		if !ok {
-			return fmt.Errorf("task %d lacks runner-generated %s evidence; use mulix test run", task.Number, stage)
-		}
-		if err := validReceipt(c, green); err != nil {
-			return err
-		}
-		if green.Snapshot.Project != current.Project || green.Snapshot.Change != p.Change || green.Snapshot.Contract != current.Contract {
-			return fmt.Errorf("task %d evidence belongs to another project/change or obsolete acceptance contract", task.Number)
-		}
-		if task.Kind == "code" {
-			red, ok := Latest(records, task.Number, "red")
-			if !ok {
-				return fmt.Errorf("task %d has no actual RED run", task.Number)
-			}
-			if err := validReceipt(c, red); err != nil {
-				return err
-			}
-			if red.ID == green.ID || red.Finished.After(green.Started) || red.Snapshot.Project != green.Snapshot.Project || red.Snapshot.Change != green.Snapshot.Change || red.Snapshot.Contract != green.Snapshot.Contract || red.Snapshot.Tests != green.Snapshot.Tests {
-				return fmt.Errorf("task %d needs RED before GREEN for the same project, contract and test files", task.Number)
-			}
-			if red.Snapshot.Source == green.Snapshot.Source {
-				return fmt.Errorf("task %d has no implementation change between RED and GREEN", task.Number)
-			}
 		}
 	}
 	return nil
+}
+
+// ValidateTaskReceipt is the read-only task-close check. Historical task
+// evidence remains usable by final verification after later tasks advance the
+// source, but a receipt cannot close a task against changed current inputs.
+func ValidateTaskReceipt(p Project, c Contract, records []RunRecord, n int) (RunRecord, error) {
+	task, ok := c.Task(n)
+	if !ok {
+		return RunRecord{}, fmt.Errorf("unknown task %d", n)
+	}
+	return taskEvidence(p, c, records, task, true)
+}
+
+func taskEvidence(p Project, c Contract, records []RunRecord, task Task, requireCurrent bool) (RunRecord, error) {
+	current, err := ExecutionFingerprint(p, c, task.Number)
+	if err != nil {
+		return RunRecord{}, err
+	}
+	stage := "check"
+	if task.Kind == "code" {
+		stage = "green"
+	}
+	green, ok := Latest(records, task.Number, stage)
+	if !ok {
+		return green, fmt.Errorf("task %d lacks runner-generated %s evidence; use mulix test run", task.Number, stage)
+	}
+	if err := validReceipt(c, green); err != nil {
+		return green, err
+	}
+	if green.Snapshot.Project != current.Project || green.Snapshot.Change != p.Change || green.Snapshot.Contract != current.Contract || green.Snapshot.Karate != current.Karate {
+		return green, fmt.Errorf("task %d evidence belongs to another project/change, contract or test runtime", task.Number)
+	}
+	if requireCurrent && (green.Snapshot.Source != current.Source || green.Snapshot.Tests != current.Tests) {
+		return green, fmt.Errorf("task %d receipt is stale; run the current task check before closing it", task.Number)
+	}
+	if task.Kind == "code" {
+		red, ok := Latest(records, task.Number, "red")
+		if !ok {
+			return green, fmt.Errorf("task %d has no actual RED run", task.Number)
+		}
+		if err := validReceipt(c, red); err != nil {
+			return green, err
+		}
+		if red.ID == green.ID || red.Finished.After(green.Started) || red.Snapshot.Project != green.Snapshot.Project || red.Snapshot.Change != green.Snapshot.Change || red.Snapshot.Contract != green.Snapshot.Contract || red.Snapshot.Tests != green.Snapshot.Tests || red.Snapshot.Karate != green.Snapshot.Karate {
+			return green, fmt.Errorf("task %d needs RED before GREEN for the same project, contract, tests and runtime", task.Number)
+		}
+		if red.Snapshot.Source == green.Snapshot.Source {
+			return green, fmt.Errorf("task %d has no implementation change between RED and GREEN", task.Number)
+		}
+	}
+	return green, nil
 }
 func ValidateReview(root, report string) error {
 	data, err := ReadProjectFile(root, report)
@@ -94,7 +115,7 @@ func ValidateVerification(p Project, c Contract, records []RunRecord, report str
 	if err := validReceipt(c, r); err != nil {
 		return err
 	}
-	current, err := Fingerprint(p, c, 0)
+	current, err := ExecutionFingerprint(p, c, 0)
 	if err != nil {
 		return err
 	}
@@ -110,8 +131,17 @@ func ValidateVerification(p Project, c Contract, records []RunRecord, report str
 	}
 	for i, suite := range policy.Suites {
 		actual := r.Suites[i]
-		if actual.ID != suite.ID || actual.CWD != suite.CWD || actual.Format != suite.Format || !reflect.DeepEqual(actual.Command, suite.Command) {
+		if actual.ID != suite.ID || actual.CWD != suite.CWD || actual.Format != suite.Format || !slices.Equal(actual.Command, suite.Command) {
 			return fmt.Errorf("verification suite does not match current policy: %s", suite.ID)
+		}
+		if suite.Format == KarateFormat {
+			scope, err := karateInputs(p, c, suite, 0)
+			if err != nil {
+				return err
+			}
+			if !slices.Equal(actual.FeatureFiles, scope.Features) {
+				return fmt.Errorf("verification did not execute the complete Karate feature scope")
+			}
 		}
 	}
 	data, err := ReadProjectFile(p.Root, report)
@@ -130,7 +160,13 @@ func Summary(r RunRecord) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n### Quality run %s\n\n- Stage: %s; task: %d; success: %v\n- Started: %s\n- Finished: %s\n- Source: %s\n- Contract: %s\n", r.ID, r.Stage, r.Task, r.Success, r.Started.Format("2006-01-02T15:04:05.999999999Z07:00"), r.Finished.Format("2006-01-02T15:04:05.999999999Z07:00"), r.Snapshot.Source, r.Snapshot.Contract)
 	for _, s := range r.Suites {
-		fmt.Fprintf(&b, "- Suite %s: exit %d; passed %d, failed %d, skipped %d\n  - Command: %q (cwd %s)\n  - stdout SHA-256: %s\n  - stderr SHA-256: %s\n", s.ID, s.ExitCode, s.Passed, s.Failed, s.Skipped, s.Command, s.CWD, s.StdoutDigest, s.StderrDigest)
+		fmt.Fprintf(&b, "- Suite %s: exit %d; passed %d, failed %d, skipped %d\n", s.ID, s.ExitCode, s.Passed, s.Failed, s.Skipped)
+		if s.Format == KarateFormat {
+			fmt.Fprintf(&b, "  - Karate features: %q\n  - events SHA-256: %s\n", s.FeatureFiles, s.EventDigest)
+		} else {
+			fmt.Fprintf(&b, "  - Command: %q (cwd %s)\n", s.Command, s.CWD)
+		}
+		fmt.Fprintf(&b, "  - stdout SHA-256: %s\n  - stderr SHA-256: %s\n", s.StdoutDigest, s.StderrDigest)
 		if s.Error != "" {
 			fmt.Fprintf(&b, "  - Error: %s\n", s.Error)
 		}

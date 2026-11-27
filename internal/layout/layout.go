@@ -4,7 +4,11 @@
 // without import cycles.
 package layout
 
-import "path"
+import (
+	"path"
+	"strconv"
+	"strings"
+)
 
 // SpecsDir holds each change's requirements doc (docs/specs/<change>/
 // spec.md). It's kept apart from ChangesDir because a spec stays useful
@@ -39,6 +43,8 @@ const (
 	StateFile = "state.yaml"
 	// DesignDir holds the design doc approved in the design phase.
 	DesignDir = "specs"
+	// TestsDir holds authored Karate cases and executable helpers, never output.
+	TestsDir = "tests"
 	// BrainstormDir holds transient visual-companion sessions in scratch.
 	// The name also remains in legacy runtime ignore rules for token safety.
 	BrainstormDir = "brainstorm"
@@ -62,4 +68,32 @@ func ChangeRuntimeDir(change string) string {
 // ChangeRuntimePath joins elems onto change's runtime directory.
 func ChangeRuntimePath(change string, elems ...string) string {
 	return path.Join(append([]string{ChangeRuntimeDir(change)}, elems...)...)
+}
+
+// RuntimeTestGroup classifies an authored file relative to a change's tests
+// directory. It returns helpers, final, or a canonical task-N, or empty for
+// unsupported files. Path validation is portable even on a Unix host.
+func RuntimeTestGroup(rel string) string {
+	parts := strings.Split(rel, "/")
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." || strings.ContainsAny(part, "\\:\x00") || strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") {
+			return ""
+		}
+	}
+	ext := path.Ext(rel)
+	if len(parts) >= 2 && parts[0] == "helpers" && (ext == ".feature" || ext == ".js") {
+		return "helpers"
+	}
+	if len(parts) < 3 || parts[0] != "features" || ext != ".feature" {
+		return ""
+	}
+	if parts[1] == "final" {
+		return "final"
+	}
+	if number, ok := strings.CutPrefix(parts[1], "task-"); ok {
+		if n, err := strconv.Atoi(number); err == nil && n > 0 && strconv.Itoa(n) == number {
+			return parts[1]
+		}
+	}
+	return ""
 }

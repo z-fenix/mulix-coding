@@ -31,8 +31,46 @@ func newTestCmd() *cobra.Command {
 	run.Flags().IntVar(&task, "task", 0, "approved task number")
 	run.Flags().StringVar(&stage, "stage", "", "red, green, or check for a reasoned non-code task")
 	run.Flags().StringVar(&change, "change", "", "change id (must match effective session context)")
-	parent.AddCommand(run)
+	parent.AddCommand(run, newTestReceiptCmd())
 	return parent
+}
+
+func newTestReceiptCmd() *cobra.Command {
+	var change string
+	var task int
+	cmd := &cobra.Command{
+		Use: "receipt", Short: "Check a current task receipt without running a suite", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if task < 1 {
+				return fmt.Errorf("use --task N")
+			}
+			store, r, err := resolveCommandContext(cmd, change, sessionctx.Inspect)
+			if err != nil {
+				return err
+			}
+			if err := requireChange(r); err != nil {
+				return err
+			}
+			s := r.State
+			if s.Phase != flow.PhaseBuild || s.Archived {
+				return fmt.Errorf("task receipt checks for closure require an active build phase")
+			}
+			p := quality.Project{Root: store.Root(), Change: r.Change, SpecPath: s.SpecPath, TasksPath: s.TasksPath}
+			c, err := quality.LoadContract(p)
+			if err != nil {
+				return err
+			}
+			record, err := quality.ValidateTaskReceipt(p, c, s.QualityRuns, task)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Task %d: current %s receipt %s\n", task, record.Stage, record.ID)
+			return nil
+		},
+	}
+	cmd.Flags().IntVar(&task, "task", 0, "approved task number")
+	cmd.Flags().StringVar(&change, "change", "", "change id (must match effective session context)")
+	return cmd
 }
 func newVerifyCmd() *cobra.Command {
 	var change string
@@ -172,8 +210,8 @@ func executeQuality(cmd *cobra.Command, change string, task int, stage string) e
 		if !ok || latest.ID != pending.ID {
 			return fmt.Errorf("a newer attempt superseded this execution")
 		}
-		if record.Snapshot.Source != "" {
-			now, e := quality.Fingerprint(p, contract, task)
+		if record.Success {
+			now, e := quality.ExecutionFingerprint(p, contract, task)
 			if e != nil || now != record.Snapshot {
 				record.Success = false
 				record.Error = "inputs changed before evidence persistence"

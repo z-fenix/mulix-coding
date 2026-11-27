@@ -130,7 +130,7 @@ def python_tests(output):
     output = Path(output)
     require(not output.exists(), "Python test report already exists")
     scopes = {}
-    for relative in ("scripts/tests", "assets/skills/mulix-verify/tests"):
+    for relative in ("scripts/tests", "compat/formal-workbench/tests"):
         path = ROOT / relative
         suite = unittest.TestLoader().discover(str(path), top_level_dir=str(path))
         result = unittest.TextTestRunner(verbosity=2).run(suite)

@@ -75,7 +75,7 @@ func createChangeDirAt(root, title string, now time.Time) (NewChange, error) {
 		nc.SpecAbsDir = filepath.Join(root, filepath.FromSlash(nc.SpecDir))
 		nc.ChangeAbsDir = filepath.Join(root, filepath.FromSlash(nc.ChangeDir))
 		runtime := filepath.Join(root, filepath.FromSlash(nc.RuntimeDir))
-		dirs := []string{runtime, nc.SpecAbsDir, nc.ChangeAbsDir}
+		dirs := []string{runtime, nc.SpecAbsDir, nc.ChangeAbsDir, filepath.Join(runtime, layout.TestsDir)}
 		collision := false
 		for _, dir := range dirs {
 			if _, err := os.Lstat(dir); err == nil {

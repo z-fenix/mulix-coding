@@ -53,9 +53,10 @@ Every PR/main push/tag/manual/scheduled qualification runs:
 - Linux root and example race. The separately built scaffold CLI also has
   `-race`; build-info tests verify this. A private race log catches diagnostics
   even when a negative-command fixture captures child stderr.
-- Both Python discovery scopes must execute nonzero tests independently, with
-  no failed/error/skipped/expected-failure/unexpected-success results. Counts
-  for each scope are retained; one suite cannot conceal an empty other suite.
+- The `scripts/tests` and `compat/formal-workbench/tests` Python discovery
+  scopes must execute nonzero tests independently, with no failed/error/skipped/
+  expected-failure/unexpected-success results. The compatibility scope checks a
+  retired project adapter; it does not install that adapter in new projects.
 - Coverage versus the actual same-platform base revision in a private clone.
   Linux amd64 also has a fixed floor from observed baseline data. Fractions are
   compared exactly; repeated `-coverpkg` blocks are merged before counting.
@@ -88,6 +89,25 @@ when an inner runner starts another session. Standalone delivery commands use
 the same primitive. This is cooperative framework process ownership, not a
 sandbox for code deliberately escaping it. Windows/macOS behavior still needs
 the corresponding native hosted runs.
+
+## Run the real Karate smoke
+
+The native matrix exercises the adapter using a portable process fixture.
+Qualify a real JAR separately with a candidate Mulix binary, a locally
+provisioned JDK 21+, and the exact RC1 hash documented in the
+[quality template](../assets/templates/quality-template.md). For example:
+
+```bash
+MULIX_BIN=/absolute/path/to/mulix \
+MULIX_KARATE_JAR=/absolute/path/to/karate-agent-2.1.5.RC1.jar \
+MULIX_KARATE_JAVA=/absolute/path/to/jdk/bin/java \
+bash scripts/smoke-karate.sh
+```
+
+It runs a disposable project against a loopback service and checks the actual
+JAR invocations: two task-scoped RED/GREEN pairs, no JAR for a non-Karate CHECK,
+final-only coverage and regression rejection, and receipt-only closure. It
+produces no project acceptance claim and does not fetch or publish the JAR.
 
 ## Build, inspect and install artifacts
 

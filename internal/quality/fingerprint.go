@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -16,12 +17,14 @@ import (
 // Snapshot includes physical project identity: copying a receipt into another
 // checkout is not evidence that commands ran there.
 type Snapshot struct {
-	Project  string `yaml:"project" json:"project"`
-	Change   string `yaml:"change" json:"change"`
-	Contract string `yaml:"contract" json:"contract"`
-	Source   string `yaml:"source" json:"source"`
-	Tests    string `yaml:"tests" json:"tests"`
-	Revision string `yaml:"revision,omitempty" json:"revision,omitempty"`
+	Project       string `yaml:"project" json:"project"`
+	Change        string `yaml:"change" json:"change"`
+	Contract      string `yaml:"contract" json:"contract"`
+	Source        string `yaml:"source" json:"source"`
+	Tests         string `yaml:"tests" json:"tests"`
+	Revision      string `yaml:"revision,omitempty" json:"revision,omitempty"`
+	Karate        string `yaml:"karate,omitempty" json:"karate,omitempty"`
+	KarateSources string `yaml:"karate_sources,omitempty" json:"karate_sources,omitempty"`
 }
 
 func Digest(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:]) }
@@ -46,7 +49,12 @@ func excluded(p Project, rel string) bool {
 	if rel == p.SpecPath || rel == p.TasksPath || rel == "docs/changes/"+p.Change+"/report.md" {
 		return true
 	}
-	for _, prefix := range []string{".git", ".superpowers", ".idea", ".mulix/.runtime", ".mulix/.locks", ".mulix/sessions", ".mulix/.installed"} {
+	// Runtime output stays out of the implementation hash, even on platforms
+	// that resolve case aliases to the same directory.
+	if lower := strings.ToLower(rel); lower == ".mulix/.runtime" || strings.HasPrefix(lower, ".mulix/.runtime/") {
+		return true
+	}
+	for _, prefix := range []string{".git", ".superpowers", ".idea", ".mulix/.locks", ".mulix/sessions", ".mulix/.installed"} {
 		if rel == prefix || strings.HasPrefix(rel, prefix+"/") {
 			return true
 		}
@@ -90,12 +98,21 @@ func sourcePaths(p Project) ([]string, string, error) {
 	})
 	return paths, "", err
 }
-func hashFiles(p Project, paths []string, allowMissing bool) (string, error) {
+func stampKarateSource(h io.Writer, rel string, data []byte) {
+	// Bind pathname and length as well as contents; the staged copies have
+	// different filesystem modes from their sources by design.
+	fmt.Fprintf(h, "%s\x00%d\x00", rel, len(data))
+	h.Write(data)
+	h.Write([]byte{0})
+}
+
+func hashFiles(p Project, paths []string, allowMissing bool, karate io.Writer) (string, error) {
 	slices.Sort(paths)
 	paths = slices.Compact(paths)
 	h := sha256.New()
 	for _, rel := range paths {
-		if rel == "" || excluded(p, rel) {
+		runtimeTest := karate != nil && runtimeTestGroup(p, rel) != ""
+		if rel == "" || (excluded(p, rel) && !runtimeTest) {
 			continue
 		}
 		if filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, "../") {
@@ -119,6 +136,9 @@ func hashFiles(p Project, paths []string, allowMissing bool) (string, error) {
 		fmt.Fprintf(h, "%s\x00%o\x00%d\x00", rel, info.Mode().Perm(), len(data))
 		h.Write(data)
 		h.Write([]byte{0})
+		if runtimeTest {
+			stampKarateSource(karate, rel, data)
+		}
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
@@ -152,17 +172,38 @@ func Fingerprint(p Project, c Contract, task int) (Snapshot, error) {
 		return s, err
 	}
 	s.Revision = rev
-	s.Source, err = hashFiles(p, paths, true)
+	s.Source, err = hashFiles(p, paths, true, nil)
 	if err != nil {
 		return s, err
 	}
 	var tests []string
 	for _, tc := range c.SelectedCases(task) {
-		if excluded(p, tc.File) {
+		if excluded(p, tc.File) && !karateCasePath(p, tc, tc.Task == 0) {
 			return s, fmt.Errorf("mapped test input is excluded workflow output: %s", tc.File)
 		}
 		tests = append(tests, tc.File)
 	}
-	s.Tests, err = hashFiles(p, tests, false)
+	policyConfig, err := LoadPolicy(root)
+	if err != nil {
+		return s, err
+	}
+	stagedInputs := sha256.New()
+	karateBound := false
+	for _, suite := range policyConfig.Suites {
+		if suite.Format != KarateFormat || !suiteSelected(c, suite.ID, task) {
+			continue
+		}
+		selection, e := karateInputs(p, c, suite, task)
+		if e != nil {
+			return s, e
+		}
+		karateBound = true
+		tests = append(tests, selection.Features...)
+		tests = append(tests, selection.Helpers...)
+	}
+	s.Tests, err = hashFiles(p, tests, false, stagedInputs)
+	if karateBound && err == nil {
+		s.KarateSources = hex.EncodeToString(stagedInputs.Sum(nil))
+	}
 	return s, err
 }

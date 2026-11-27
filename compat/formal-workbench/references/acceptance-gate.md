@@ -16,7 +16,7 @@
 
 ## 1. 在执行前冻结验收合同
 
-从 `.mulix/templates/acceptance-contract-template.json` 派生 `docs/changes/<change>/acceptance-contract.json`。模板故意包含占位符、PARTIAL 和阻断项，不能直接通过。
+从本兼容包的 `templates/` 中的 `acceptance-contract-template.json` 派生 `docs/changes/<change>/acceptance-contract.json`。模板故意包含占位符、PARTIAL 和阻断项，不能直接通过。
 
 - `schema_version=1`，`acceptance_level=FORMAL`。内核/集成/装配完成在任务报告中另列，不使用该门禁升级结论。
 - `baseline` 固定实际受测实现完整 revision（40/64 位小写十六进制不可变标识）、环境 ID、change 的 spec.md、父仓 Product-Spec.md、工作台正式用例正文的路径和 SHA-256。实现标识必须独立核验实际部署/冻结构建；不能仅抄当前 HEAD 冒充未部署或不同工作区的版本。
@@ -45,7 +45,7 @@
 
 ## 3. 真实执行后收集逐检查点结果
 
-从 `.mulix/templates/acceptance-results-template.json` 派生同目录 `acceptance-results.json`。由实际执行/审核流程填入 `change`、`contract_sha256`、同源 revision/environment、带时区的 `executed_at` 和逐点实际结果。结果的 `executed_at` 是本次汇总截止时间，不代替原始执行记录的时间。
+从本兼容包的 `templates/` 中的 `acceptance-results-template.json` 派生同目录 `acceptance-results.json`。由实际执行/审核流程填入 `change`、`contract_sha256`、同源 revision/environment、带时区的 `executed_at` 和逐点实际结果。结果的 `executed_at` 是本次汇总截止时间，不代替原始执行记录的时间。
 
 - case 与 checkpoint 集合必须与合同完全一致，不能遗漏、重复、添加或靠空数组通过。
 - 每点必须 `status=PASS`、非空 `actual`、真实 `evidence` 文件引用。FAIL/BLOCKED/PARTIAL/NOT_RUN/SKIPPED_BY_USER、任一 `blockers` 都阻断；状态只能反映事实，不为通过校验而改写。
@@ -57,12 +57,13 @@
 
 ## 4. 在 verify 放行前执行
 
-从后端根目录，将 `CHANGE` 设置为已审阅的实际变更 ID，以独立核验的受测版本执行：
+从后端根目录，将 `KIT` 设置为项目自管兼容包的绝对路径，将 `CHANGE` 设置为已审阅的实际变更 ID，以独立核验的受测版本执行：
 
 ```bash
+: "${KIT:?set the project-owned compatibility kit path}"
 : "${CHANGE:?set the reviewed change ID}"
 : "${VERIFIED_DEPLOYED_REVISION:?set the independently verified deployed revision}"
-python3 -I -B {{SKILLS_DIR}}/mulix-verify/scripts/check-acceptance.py \
+python3 -I -B "$KIT/scripts/check-acceptance.py" \
   --project-root "$PWD" \
   --workbench-root ../test \
   --contract "docs/changes/$CHANGE/acceptance-contract.json" \
@@ -79,7 +80,7 @@ python3 -I -B {{SKILLS_DIR}}/mulix-verify/scripts/check-acceptance.py \
 ## 工具自身验证
 
 ```bash
-python3 -I -B -m unittest discover -s {{SKILLS_DIR}}/mulix-verify/tests -p 'test_*.py' -v
+python3 -I -B -m unittest discover -s "${KIT:?set the compatibility kit path}/tests" -p 'test_*.py' -v
 ```
 
 这些临时合成夹具只验证校验器的拒绝/放行行为，不是产品运行、PostgreSQL、正式用例准入、二次认证或 REQ-031 验收证据。测试及完整命令日志留在当前会话 scratch，不混入其他变更的任务台账。

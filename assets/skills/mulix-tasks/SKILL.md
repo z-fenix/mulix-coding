@@ -33,12 +33,11 @@ mulix specifics:
   order, no gaps, each exactly once. The build executors extract briefs by
   this heading, and the guards match ledger lines and reports to it.
 - **Acceptance contract:** include the template's per-task requirement IDs,
-  delivery level, original formal case/checkpoint IDs or explicit gaps,
-  Given/When/Then including forbidden effects, real facilities and doubles,
-  proof boundaries, downstream owner/gates, and separate implementation and
-  acceptance statuses. For a foundation task, name the integration task that
-  owns full business proof; a kernel GREEN does not close that obligation.
-  Carry the spec's full acceptance scope and blockers into the global gates.
+  AC/TC mappings, observable Given/When/Then, evidence limits, dependencies
+  and unresolved gates. Preserve IDs from a separate acceptance source only
+  when the project defines one. For a foundational task, name who owns
+  integration evidence; a local GREEN does not prove integrated behavior.
+  Carry the spec's acceptance scope and blockers into the global gates.
 - **Steps:** code tasks use RED → verify RED → GREEN → verify GREEN with
   `mulix test run --task N --stage red|green`, and commit only if authorized.
   Verification/documentation tasks declare a concrete reason and run a real
@@ -49,7 +48,10 @@ mulix specifics:
   Map every AC and task to concrete TC cases with point, Given/When/Then,
   suite, exact emitted test name and project-relative test source file.
   Derive assertions from the spec; review normal, boundary, error, permission
-  and integration cases. Declare each task's kind and non-code reason.
+  and integration cases. Declare each task's kind and non-code reason. When
+  Karate is configured, give each task its own `tests/features/task-N/` entries;
+  record any required final-only Karate cases in the same matrix's
+  `verify_cases`. Read the quality template for the exact path/name contract.
 - **Mandatory suites:** read `.mulix/templates/quality-template.md`, inspect
   the project's actual test commands and configure `.mulix/quality.yaml`.
   All declared suites run at final verification, including nested modules and

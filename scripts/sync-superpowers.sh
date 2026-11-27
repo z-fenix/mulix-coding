@@ -13,7 +13,7 @@
 # upstream drift fails the sync instead of silently shipping a half-
 # rewritten copy.
 #
-# Usage: scripts/sync-superpowers.sh <superpowers-checkout-or-plugin-dir>
+# Usage: scripts/sync-superpowers.sh <pinned-superpowers-checkout>
 set -euo pipefail
 
 if [ $# -ne 1 ]; then
@@ -25,19 +25,39 @@ src=$1
 [ -d "$src/skills" ] || { echo "no skills/ directory under $src" >&2; exit 2; }
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-dest="$repo/assets/superpowers"
+live="$repo/assets/superpowers"
+expected_version=7.0.2
+expected_commit=22f0b463e7a5e579904dd6211a520321035526f7
+[ -e "$src/.git" ] && [ "$(git -C "$src" rev-parse HEAD)" = "$expected_commit" ] || { printf 'expected a checkout of upstream commit %s\n' "$expected_commit" >&2; exit 2; }
+version=$(git -C "$src" show "$expected_commit:.claude-plugin/plugin.json" | sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+[ "$version" = "$expected_version" ] || { printf 'expected upstream %s, got %s\n' "$expected_version" "${version:-unknown}" >&2; exit 2; }
+git -C "$src" diff --quiet HEAD -- skills LICENSE .claude-plugin/plugin.json || { printf 'upstream inputs have local edits\n' >&2; exit 2; }
 
-version=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$src/.claude-plugin/plugin.json" | head -n 1)
-[ -n "$version" ] || { echo "cannot read version from $src/.claude-plugin/plugin.json" >&2; exit 2; }
-
-# Empty the destination in place rather than removing it: IDE indexers on
-# Windows hold directory handles open, which makes removing the directory
-# itself fail with "Device or resource busy".
-mkdir -p "$dest/skills"
-find "$dest" -mindepth 1 -not -path "$dest/skills" -delete 2>/dev/null || true
-find "$dest/skills" -mindepth 1 -delete
-cp -r "$src/skills/." "$dest/skills/"
-cp "$src/LICENSE" "$dest/LICENSE"
+# Generate everything off the live tree. Exact-match failures are expected
+# during upstream upgrades and must not leave an incomplete embedded bundle.
+[ ! -L "$live" ] || { printf 'refusing linked vendor destination\n' >&2; exit 2; }
+mkdir -p "$repo/assets"
+staging=$(mktemp -d "$repo/assets/.superpowers-sync.XXXXXX")
+dest="$staging/generated"
+previous="$staging/previous"
+published=0
+cleanup() {
+  local rc=$?
+  trap - EXIT
+  if [ "$published" = 0 ] && [ -e "$previous" ]; then
+    if [ -e "$live" ] || ! mv -- "$previous" "$live"; then
+      printf 'previous bundle retained at %s; restore it before retrying\n' "$previous" >&2
+      exit 1
+    fi
+  fi
+  rm -rf -- "$staging"
+  exit "$rc"
+}
+trap cleanup EXIT
+mkdir "$dest"
+# Read the pinned tree, not the working directory: ignored files (for
+# example a local note or editor output) must never become embedded assets.
+git -C "$src" archive "$expected_commit" -- skills LICENSE | tar -x -C "$dest"
 printf '%s\n' "$version" > "$dest/VERSION"
 
 # Normalize line endings: the embedded copies are installed byte-for-byte,
@@ -76,6 +96,13 @@ IFS= read -r -d '' MULIX_BRAINSTORM_OLD <<'MULIX_OLD' || true
 SESSION_ID="$$-$(date +%s)"
 
 if [[ -n "$PROJECT_DIR" ]]; then
+  # Make the project dir absolute now: the script cds into its own directory
+  # before starting the server, which would re-root a relative path there.
+  # mkdir -p keeps the existing behavior of creating a missing project dir.
+  if ! PROJECT_DIR="$(mkdir -p -- "$PROJECT_DIR" && CDPATH='' cd -- "$PROJECT_DIR" && pwd)"; then
+    echo "{\"error\": \"Cannot create or enter --project-dir\"}"
+    exit 1
+  fi
   SESSION_DIR="${PROJECT_DIR}/.mulix/.runtime/<change>/brainstorm/${SESSION_ID}"
   # Persist the bound port and key per project so a restart reuses them and an
   # already-open browser tab reconnects to the same URL with a valid cookie.
@@ -163,9 +190,9 @@ for f in "$sp/subagent-driven-development/SKILL.md" "$sp/executing-plans/SKILL.m
     s{\[Delete this plan\x27s workspace — the record now lives in git\]}{[Keep this plan\x27s workspace — mulix keeps it as the change\x27s execution record]}g;
   ' "$f"
 done
-patch "$sp/subagent-driven-development/SKILL.md" 's{When the final whole-branch review is clean and its fixes are merged,\ndelete this plan\x27s workspace \(`rm -rf <workspace>`\) — the git history is\nthe record now\. Sibling directories belong to other plans; leave them\nalone\.}{When the final whole-branch review is clean and its fixes are merged,\nkeep this plan\x27s workspace: under mulix it is the change\x27s execution\nrecord (ledger, briefs, reports, review packages), and the build-complete\nguard reads it. Sibling directories belong to other plans; leave them\nalone.}g'
+patch "$sp/subagent-driven-development/references/final-review.md" 's{When the final whole-branch review is clean and its fixes are merged,\ndelete this plan\x27s workspace \(`rm -rf <workspace>`\) — the git history is\nthe record now\. Sibling directories belong to other plans; leave them\nalone\.}{When the final whole-branch review is clean and its fixes are merged,\nkeep this plan\x27s workspace: under mulix it is the change\x27s execution\nrecord (ledger, briefs, reports, review packages), and the build-complete\nguard reads it. Sibling directories belong to other plans; leave them\nalone.}g'
 patch "$sp/executing-plans/SKILL.md" 's{When the final review is clean and its fixes are committed, delete this\nplan\x27s workspace directory — the git history is the record now\. Sibling\ndirectories belong to other plans; leave them alone\.}{When the final review is clean and its fixes are committed, keep this\nplan\x27s workspace directory: under mulix it is the change\x27s execution\nrecord, and the build-complete guard reads it. Sibling directories belong\nto other plans; leave them alone.}g'
-patch "$sp/subagent-driven-development/SKILL.md" 's{Before you delete anything, collect}{Before you finish, collect}g'
+patch "$sp/subagent-driven-development/references/final-review.md" 's{Before you delete anything, collect}{Before you finish, collect}g'
 patch "$sp/executing-plans/SKILL.md" 's{Before you delete anything, collect}{Before you finish, collect}g'
 
 # brainstorming: mulix's design phase invokes it. Its terminal states are
@@ -185,17 +212,24 @@ patch "$sp/writing-plans/SKILL.md" 's{\*\*Save plans to:\*\* `docs/changes/<chan
 # Preserve the existing step-status/brief-refresh contract across regeneration.
 patch "$sp/subagent-driven-development/SKILL.md" 's{task fits in the project; \(2\) the brief path}{task fits in the project; the approved PLAN_FILE path and task number\n  for status-only edits under mulix-build; (2) the brief path}g'
 patch "$sp/subagent-driven-development/SKILL.md" 's{ruling at the cap — append the completion line to the ledger in the same\nmessage as your other bookkeeping:\n}{ruling at the cap — refresh this task\x27s brief from the approved plan first:\n`bash scripts/task-brief PLAN_FILE N` (from this skill\x27s directory).\nThe plan owns step status; the brief is a derived snapshot. Under mulix,\nthe implementer records only verified steps in tasks.md as mulix-build\nrequires. Preserve skipped/unperformed steps and fenced examples; a clean\nreview does not prove every step ran. If extraction fails, resolve it\nbefore recording completion. After refresh succeeds, append the completion\nlist item in the same message as your other bookkeeping:\n}g'
-patch "$sp/subagent-driven-development/SKILL.md" 's{(\[Ledger: Task 1: complete \(commits a1b2c3d\.\.d4e5f6a, review clean\)\])}{[Refresh task-1-brief from tasks.md via bash scripts/task-brief; confirm success]\n$1}g'
-patch "$sp/subagent-driven-development/SKILL.md" 's{(\[Ledger: Task 2: complete \(commits d4e5f6a\.\.b7c8d9e, review clean\)\])}{[Refresh task-2-brief from tasks.md via bash scripts/task-brief; confirm success]\n$1}g'
+# v7.0.2 removed the old worked ledger transcript. The normative
+# completion and implementer-prompt patches carry the refresh contract.
 patch "$sp/subagent-driven-development/implementer-prompt.md" 's{    It contains the full task text from the plan\.\n}{    It contains the full task text from the plan.\n    Approved plan: [PLAN_FILE]; task number: [N].\n    Under mulix, tasks.md owns step status; the brief is a derived snapshot.\n    After each step actually runs and its expected result is verified,\n    change only that step\x27s marker in this task in PLAN_FILE from `- [ ]`\n    to `- [X]`, then refresh this brief using\n    `bash <skills-dir>/subagent-driven-development/scripts/task-brief PLAN_FILE N`.\n    Locate your own task for status edits; you need not read the whole plan.\n    Keep all definitions and commands unchanged. Future/unperformed steps,\n    skipped or unauthorized commits, and fenced checkbox examples stay `[ ]`.\n    Report skipped steps explicitly; GREEN is not evidence every step ran.\n}g'
 patch "$sp/executing-plans/SKILL.md" 's{tests, keeps the full output in the workspace, prints the tail, and — only\nif they pass — appends the completion line to the ledger:\n\n`Task <N>: complete \(commits <base7>\.\.<head7>, tests: <command> → <result>\)`\n}{tests, keeps the full output in the workspace, and prints the tail. Only\nif they pass, it refreshes this task\x27s brief from the approved plan via\n`task-brief`, then appends the completion list item to the ledger:\n\n`Task <N>: complete (commits <base7>..<head7>, tests: <command> → <result>)`\n\nThe plan owns step status; the brief is a derived snapshot. Under mulix,\nrecord each verified step in tasks.md as mulix-build requires before\ncalling task-done. Skipped/unperformed steps and fenced examples keep their\noriginal markers. A brief refresh failure records no completion; resolve\nit before continuing.\n}g'
+
+# Inline uses the already recorded native GREEN/CHECK for closure. Keep
+# the helper's generic argv contract, but hand it the read-only check.
+patch "$sp/executing-plans/SKILL.md" 's{- The final test run for the task passed — `task-done` is that run, and\n  it writes the command and result into the ledger line\.}{- The task\x27s `mulix test run` GREEN/CHECK passed. At closure, `task-done`\n  verifies its existing receipt and records the check; do not rerun the suite.}g'
+patch "$sp/executing-plans/SKILL.md" 's{Run this skill\x27s `scripts/task-done PLAN_FILE N BASE -- <test command>`\nby its absolute path, from the working tree you\x27re executing in, with the test command the brief names for the whole task\. It runs the\ntests, keeps the full output in the workspace, and prints the tail\. Only\nif they pass}{Run `bash <skills-dir>/executing-plans/scripts/task-done PLAN_FILE N BASE -- mulix test receipt --task N`\nfrom the project root after the planned GREEN/CHECK has executed. The helper\nkeeps the receipt-check output in the workspace. Only if the receipt is current}g'
+perl -pi -e 's{task-done: run tests, ledger the result; mark todo complete}{task-done: check existing receipt; mark todo complete}g' "$sp/executing-plans/SKILL.md"
+patch "$sp/subagent-driven-development/SKILL.md" 's{After refresh succeeds, append the completion\nlist item in the same message as your other bookkeeping:}{After refresh succeeds, check the existing GREEN/CHECK with\n`mulix test receipt --task N`; repeat execution only if the receipt is missing\nor invalid. Then append the completion list item with your other bookkeeping:}g'
 
 # Only the standard task-done log is retained; ad-hoc output is temporary.
 patch "$sp/executing-plans/SKILL.md" 's{context for the rest of the session\. Redirect long test output to a file\nin the workspace and read its tail; read a brief, not the whole plan\.}{context for the rest of the session. Under mulix, query\n`mulix context show --field scratch-dir` with the current identity and put\nad-hoc RED, rerun, debug and build output in its `verification/` directory.\nKeep command/result summaries and relevant RED/GREEN evidence in the existing\ntask report and ledger. Only task-done maintains `task-N-tests.log` in the\nretained workspace. Read a brief, not the whole plan.}g'
 
 # Keep runtime task formatting and status synchronization across upstream syncs.
 patch "$sp/executing-plans/SKILL.md" 's/- Check for this plan\x27s ledger at `<workspace>\/progress\.md`\. If its first\n  line names your plan file, tasks with a `Task <N>: complete` line are\n  DONE — do not redo them; resume at the first task without one\. Their\n/- Check for this plan\x27s ledger at `<workspace>\/progress.md`. If its first\n  line names your plan file, tasks with a `- Task <N>: complete` line are\n  DONE — do not redo them; resume at the first task without one. Their\n/'
-patch "$sp/subagent-driven-development/SKILL.md" 's/- Check for this plan\x27s ledger at `<workspace>\/progress\.md`\. If its first\n  line names your plan file, tasks with a `Task <N>: complete` line are DONE\n  — do not re-dispatch them; resume at the first task without one\. A task\n/- Check for this plan\x27s ledger at `<workspace>\/progress.md`. If its first\n  line names your plan file, tasks with a `- Task <N>: complete` line are DONE\n  — do not re-dispatch them; resume at the first task without one. A task\n/'
+patch "$sp/subagent-driven-development/references/resuming.md" 's{tasks with a `Task <N>:\ncomplete` line are DONE}{tasks with a `- Task <N>: complete` list item or legacy plain completion line are DONE}g'
 
 # Runtime ledger tools and templates are mulix-owned. Apply their canonical
 # overlay after upstream rewrites so future syncs keep the sectioned format.
@@ -215,4 +249,11 @@ if grep -rnE '\.superpowers/|docs/superpowers/|superpowers:[a-z]' "$sp"; then
   exit 1
 fi
 
-echo "vendored superpowers $version into $dest ($(find "$sp" -type f | wc -l | tr -d ' ') files)"
+files=$(find "$sp" -type f | wc -l | tr -d ' ')
+if [ -e "$live" ]; then
+  mv -- "$live" "$previous"
+fi
+[ ! -e "$live" ] && [ ! -L "$live" ] || { printf 'vendor destination appeared during sync\n' >&2; exit 1; }
+mv -- "$dest" "$live"
+published=1
+printf 'vendored superpowers %s into %s (%s files)\n' "$version" "$live" "$files"

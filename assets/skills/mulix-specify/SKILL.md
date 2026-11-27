@@ -34,13 +34,12 @@ change, and every later phase checks its output against it.
 
 ## Execution flow
 
-Read the actual `.mulix/memory/constitution.md`, not the constitution
-template. Fill the spec template's Acceptance Baseline & Scope and
-Formal Acceptance Mapping: original formal case/checkpoint IDs where applicable,
-source versions, observable results, confirmed exclusions and unresolved gates.
-A candidate or missing case stays explicit; do not invent admission or infer
-that task completion means formal acceptance. Keep the native
-`mulix-acceptance` criteria; project workbench mappings supplement them.
+Read the actual `.mulix/memory/constitution.md`, not its template. Fill
+Acceptance Baseline & Scope and Acceptance Mapping: anchor each requirement
+to an observable AC, the applicable source versions, approved exclusions and
+unresolved gates. Use a separate acceptance source only when the project
+explicitly defines it; preserve its original IDs without assuming approval.
+Keep the native `mulix-acceptance` criteria regardless of that source.
 
 1. Parse the feature description. If it's empty, stop and ask for one —
    don't invent a feature out of nothing.

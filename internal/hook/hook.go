@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/z-fenix/mulix-coding/internal/fileutil"
 	"github.com/z-fenix/mulix-coding/internal/flow"
 	"github.com/z-fenix/mulix-coding/internal/layout"
 )
@@ -73,7 +74,7 @@ var gatedTools = map[string]bool{"Write": true, "Edit": true}
 // state.yaml stays CLI-only; this is a Write/Edit policy, not a sandbox.
 var runtimeWritable = map[flow.Phase][]string{
 	flow.PhaseDesign: {layout.DesignDir},
-	flow.PhaseBuild:  {layout.SddDir},
+	flow.PhaseBuild:  {layout.SddDir, layout.TestsDir},
 }
 
 // Decide applies the phase whitelist to req against root/s. root is the
@@ -88,6 +89,9 @@ func Decide(root string, s flow.State, req Request) Decision {
 	}
 
 	rel := relativeSlash(root, req.ToolInput.FilePath)
+	if linkedRuntimeTest(root, req.ToolInput.FilePath, rel) {
+		return Decision{Reason: "Runtime tests must be ordinary change-owned source paths, not aliases.", Next: "Write the source into the owning change's tests directory."}
+	}
 
 	if isUnder(rel, layout.RuntimeDir) {
 		return decideRuntime(s, rel)
@@ -136,6 +140,12 @@ func decideRuntime(s flow.State, rel string) Decision {
 	}
 	for _, sub := range runtimeWritable[s.Phase] {
 		if isUnder(rel, path.Join(own, sub)) {
+			if sub == layout.TestsDir {
+				parts := strings.SplitN(rel, "/", 5)
+				if s.Archived || len(parts) != 5 || layout.RuntimeTestGroup(parts[4]) == "" {
+					return Decision{Reason: "Runtime tests accepts only authored feature and helper files in build.", Next: "Store run output in the current session's scratch directory."}
+				}
+			}
 			return Decision{Allow: true}
 		}
 	}
@@ -209,6 +219,27 @@ func relativeSlash(root, p string) string {
 		p = rel
 	}
 	return filepath.ToSlash(filepath.Clean(p))
+}
+
+// A link in the logical tests path must not turn a restricted write into
+// an unrestricted build write outside the runtime tree.
+func linkedRuntimeTest(root, requested, physical string) bool {
+	if !filepath.IsAbs(requested) {
+		requested = filepath.Join(root, requested)
+	}
+	rel, err := filepath.Rel(root, requested)
+	if err != nil {
+		return false
+	}
+	rel = filepath.ToSlash(rel)
+	parts := strings.SplitN(rel, "/", 5)
+	if !isUnder(rel, layout.RuntimeDir) || len(parts) < 4 || !samePath(parts[3], layout.TestsDir) {
+		return false
+	}
+	// A dangling link resolves to its original spelling in canonicalPath.
+	// Inspect existing path components as well as the resolved destination.
+	_, err = fileutil.ControlPath(root, rel, false)
+	return err != nil || !samePath(rel, physical)
 }
 
 // Write targets may not exist yet. Resolve the nearest existing ancestor so

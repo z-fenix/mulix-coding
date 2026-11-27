@@ -304,6 +304,18 @@ func TestVendorPatches_ResolveContextInsteadOfReadingActive(t *testing.T) {
 		t.Skip("set MULIX_SUPERPOWERS_SOURCE to matching upstream for regeneration proof")
 	}
 	repo := t.TempDir()
+	// Local ignored files are especially easy to include accidentally when
+	// copying a checkout rather than materializing its pinned tree.
+	checkout := filepath.Join(repo, "upstream checkout")
+	if out, err := exec.Command("git", "clone", "--quiet", "--no-hardlinks", source, checkout).CombinedOutput(); err != nil {
+		t.Fatalf("clone pinned source: %v %s", err, out)
+	}
+	exclude := filepath.Join(checkout, ".git", "info", "exclude")
+	if err := os.WriteFile(exclude, []byte("/skills/brainstorming/local-note.md\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	writeProjectFile(t, checkout, "skills/brainstorming/local-note.md", "local ignored note\n")
+	source = checkout
 	scripts := filepath.Join(repo, "scripts")
 	if err := os.MkdirAll(scripts, 0700); err != nil {
 		t.Fatal(err)
@@ -320,10 +332,69 @@ func TestVendorPatches_ResolveContextInsteadOfReadingActive(t *testing.T) {
 	if err := os.CopyFS(filepath.Join(scripts, "superpowers-overrides"), os.DirFS(filepath.Join("..", "..", "scripts", "superpowers-overrides"))); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("bash", filepath.ToSlash(copyScript), filepath.ToSlash(source))
-	out, err := cmd.CombinedOutput()
+	vendorRoot := filepath.Join(repo, "assets", "superpowers")
+	if err := os.MkdirAll(vendorRoot, 0700); err != nil {
+		t.Fatal(err)
+	}
+	before := filepath.Join(vendorRoot, "VERSION")
+	if err := os.WriteFile(before, []byte("previous bundle\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	sync := func() ([]byte, error) {
+		return exec.Command("bash", filepath.ToSlash(copyScript), filepath.ToSlash(source)).CombinedOutput()
+	}
+	drifted := strings.Replace(string(data), "# Generate unique session directory", "# Intentional test drift", 1)
+	if drifted == string(data) {
+		t.Fatal("test cannot inject patch drift")
+	}
+	if err := os.WriteFile(copyScript, []byte(drifted), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := sync(); err == nil || !strings.Contains(string(out), "patch matched") {
+		t.Fatalf("expected a rejected exact patch: %v %s", err, out)
+	}
+	if got, err := os.ReadFile(before); err != nil || string(got) != "previous bundle\n" {
+		t.Fatalf("failed sync changed the live tree: %q %v", got, err)
+	}
+	if err := os.WriteFile(copyScript, data, 0700); err != nil {
+		t.Fatal(err)
+	}
+	out, err := sync()
 	if err != nil {
 		t.Fatalf("regeneration: %v %s", err, out)
+	}
+	if got, err := os.ReadFile(before); err != nil || strings.TrimSpace(string(got)) != "7.0.2" {
+		t.Fatalf("published wrong version: %q %v", got, err)
+	}
+	if _, err := os.Lstat(filepath.Join(vendorRoot, "skills", "brainstorming", "local-note.md")); !os.IsNotExist(err) {
+		t.Fatalf("ignored checkout file was published: %v", err)
+	}
+	snapshot := func() []string {
+		t.Helper()
+		var entries []string
+		err := filepath.WalkDir(vendorRoot, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			rel, err := filepath.Rel(vendorRoot, p)
+			if err != nil {
+				return err
+			}
+			b, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			entries = append(entries, fmt.Sprintf("%s:%x", rel, sha256.Sum256(b)))
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return entries
+	}
+	first := snapshot()
+	if out, err := sync(); err != nil || !slices.Equal(first, snapshot()) {
+		t.Fatalf("same pinned input did not regenerate byte-for-byte: %v %s", err, out)
 	}
 	root, _, store := sessionScriptFixture(t)
 	sdd := filepath.Join(repo, "assets", "superpowers", "skills", "subagent-driven-development", "scripts", "sdd-workspace")

@@ -10,6 +10,9 @@
   },
   "required_tests": {
     "all": [
+      "github.com/z-fenix/mulix-coding/internal/quality#TestRunKarateValidatesStructuredScenarioEvidence",
+      "github.com/z-fenix/mulix-coding/internal/cliutil#TestQualityCLIReceiptIsReadOnlyAndRequiresCurrentInputs",
+      "github.com/z-fenix/mulix-coding/internal/scaffold#TestNewCreatesChangeOwnedRuntimeTests",
       "github.com/z-fenix/mulix-coding/internal/quality#TestRunRejectsFalseSuccess",
       "github.com/z-fenix/mulix-coding/internal/quality#TestRunRejectsOutputOverflowDespiteFailingMappedTest",
       "github.com/z-fenix/mulix-coding/internal/quality#TestRunRejectsREDWithUnrelatedPackageBuildFailure",
