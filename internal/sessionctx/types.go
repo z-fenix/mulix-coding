@@ -27,6 +27,12 @@ type Access int
 const (
 	Inspect Access = iota
 	Mutate
+	// InspectReadOnly reads selection and state without creating lock files.
+	// Its result is for preview only; writers must resolve and recheck under locks.
+	InspectReadOnly
+	// CloseArchivedSpec is reserved for closing a remote spec on an explicit,
+	// already archived change. It never selects a change or permits a local write.
+	CloseArchivedSpec
 )
 
 type Identity struct {

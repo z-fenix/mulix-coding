@@ -16,7 +16,8 @@
 # predates the marker scheme and is adopted for the current plan so in-flight
 # workspaces keep resolving — which means the first collision on such a
 # legacy workspace adopts instead of detecting; acceptable, marker-less
-# workspaces age out as plans finish.
+# workspaces age out as plans finish. A native task directory never adopts
+# such a workspace: it requires its exact Mulix-root-relative marker.
 #
 # The workspace lives in the working tree (not under .git/) because Claude Code
 # treats .git/ as a protected path and denies agent writes there — which blocks
@@ -32,7 +33,7 @@
 # checkout or worktree needs no `cd DIR ;` prefix, a compound that harnesses
 # cannot allowlist because DIR differs on every run (#1799).
 #
-# Usage: sdd-workspace [-C DIR] PLAN_FILE
+# Usage: sdd-workspace [-C DIR] PLAN_PATH
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -43,16 +44,11 @@ if [ "${1:-}" = "-C" ]; then
 fi
 
 if [ $# -ne 1 ]; then
-  echo "usage: sdd-workspace [-C DIR] PLAN_FILE" >&2
+  echo "usage: sdd-workspace [-C DIR] PLAN_PATH" >&2
   exit 2
 fi
 
 plan=$1
-[ -f "$plan" ] || { echo "no such plan file: $plan" >&2; exit 2; }
-
-slug=$(basename "$plan" .md)
-[ -n "$slug" ] && [ "$slug" != "." ] && [ "$slug" != ".." ] \
-  || { echo "cannot derive a workspace name from: $plan" >&2; exit 2; }
 
 # Physical path, spelled the way pwd -P spells the plan path below: on Git
 # Bash, rev-parse prints C:/Users/... while pwd prints /c/Users/..., and the
@@ -65,46 +61,85 @@ root=$(CDPATH='' cd -- "$toplevel" && pwd -P)
 # mulix: resolve the effective context in the nearest mulix root. The
 # mulix root (the directory holding .mulix/) may sit below the git root.
 mulix_root=$PWD
-while [ "$mulix_root" != "/" ] && [ ! -d "$mulix_root/.mulix" ]; do
-  mulix_root=$(dirname "$mulix_root")
+while [ ! -d "$mulix_root/.mulix" ]; do
+  up=$(dirname "$mulix_root")
+  [ "$up" != "$mulix_root" ] || break
+  mulix_root=$up
 done
 [ -d "$mulix_root/.mulix" ] || mulix_root=$root
-runtime_dir=$(cd "$mulix_root" && mulix context show --field runtime-dir) || exit 1
+# Read all workspace inputs from the same effective selection. An active
+# change switch must not pair one change's runtime with another's layout.
+sdd_context=$(cd "$mulix_root" && mulix context show --field sdd-context) || exit 1
+{
+  IFS= read -r artifact_mode
+  IFS= read -r runtime_dir
+  case "$artifact_mode" in
+    native) IFS= read -r plan_id ;;
+    legacy) ;;
+    *) printf 'sdd-workspace: invalid Mulix artifact mode\n' >&2; exit 2 ;;
+  esac
+} <<< "$sdd_context"
 if command -v cygpath >/dev/null 2>&1; then
   runtime_dir=$(cygpath -m "$runtime_dir") || exit 1
 fi
 base="$runtime_dir/sdd"
 
-# Normalize the plan path (physical directory, so relative/absolute/../
-# spellings of one plan compare equal) and express it as the marker value:
-# repo-relative when the plan lives under the repo root, absolute otherwise.
-plan_dir=$(CDPATH='' cd -- "$(dirname "$plan")" && pwd -P)
-plan_abs="$plan_dir/$(basename "$plan")"
-case "$plan_abs" in
-  "$root"/*) plan_id=${plan_abs#"$root"/} ;;
-  *)         plan_id=$plan_abs ;;
-esac
-
-# True when the workspace at $1 is (or becomes) this plan's: an existing
-# marker must name this plan; a missing marker means a new workspace or a
-# pre-marker legacy one, and either way the plan claims it by writing one.
-owns() {
-  if [ -e "$1/plan-path" ]; then
-    [ "$(cat "$1/plan-path")" = "$plan_id" ]
-  else
-    mkdir -p "$1"
-    printf '%s\n' "$plan_id" > "$1/plan-path"
+if [ "$artifact_mode" = native ]; then
+  approved_dir="$mulix_root/$plan_id"
+  approved=$(CDPATH='' cd -P -- "$approved_dir" && pwd -P) || exit 1
+  runtime=$(CDPATH='' cd -P -- "$runtime_dir" && pwd -P) || exit 1
+  if ! plan_abs=$(CDPATH='' cd -P -- "$plan" && pwd -P) ||
+    [ "$plan_abs" != "$approved" ] || [ "${approved%/*}" != "$runtime" ]; then
+    printf 'sdd-workspace: plan must be the current native task directory: %s\n' "$approved_dir" >&2
+    exit 2
   fi
-}
+  if [ -L "$base" ] || [ -L "$base/.gitignore" ]; then
+    printf 'sdd-workspace: refusing linked SDD workspace under %s\n' "$base" >&2
+    exit 2
+  fi
+  mkdir -p -- "$base"
+  dir="$base/${approved##*/}"
+  if mkdir -m 700 -- "$dir" 2>/dev/null; then
+    printf '%s\n' "$plan_id" > "$dir/plan-path"
+  fi
+  if [ -L "$dir" ] || [ -L "$dir/plan-path" ] || [ ! -f "$dir/plan-path" ] ||
+    ! cmp -s "$dir/plan-path" <(printf '%s\n' "$plan_id"); then
+    printf 'sdd-workspace: existing workspace is not bound to %s\n' "$plan_id" >&2
+    exit 2
+  fi
+else
+  [ -f "$plan" ] || { echo "no such plan file: $plan" >&2; exit 2; }
 
-dir="$base/$slug"
-if ! owns "$dir"; then
-  parent=$(basename "$plan_dir")
-  dir="$base/$slug-$parent"
+  slug=$(basename "$plan" .md)
+  [ -n "$slug" ] && [ "$slug" != "." ] && [ "$slug" != ".." ] \
+    || { echo "cannot derive a workspace name from: $plan" >&2; exit 2; }
+
+  # Legacy markers are repo-relative in-repo and absolute otherwise.
+  plan_dir=$(CDPATH='' cd -- "$(dirname "$plan")" && pwd -P)
+  plan_abs="$plan_dir/$(basename "$plan")"
+  case "$plan_abs" in
+    "$root"/*) plan_id=${plan_abs#"$root"/} ;;
+    *)         plan_id=$plan_abs ;;
+  esac
+
+  owns() {
+    if [ -e "$1/plan-path" ]; then
+      [ "$(cat "$1/plan-path")" = "$plan_id" ]
+    else
+      mkdir -p "$1"
+      printf '%s\n' "$plan_id" > "$1/plan-path"
+    fi
+  }
+
+  dir="$base/$slug"
   if ! owns "$dir"; then
-    n=2
-    while ! owns "$base/$slug-$parent-$n"; do n=$((n + 1)); done
-    dir="$base/$slug-$parent-$n"
+    parent=$(basename "$plan_dir")
+    dir="$base/$slug-$parent"
+    if ! owns "$dir"; then
+      n=2
+      while ! owns "$base/$slug-$parent-$n"; do n=$((n + 1)); done
+      dir="$base/$slug-$parent-$n"
+    fi
   fi
 fi
 

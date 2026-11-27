@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/z-fenix/mulix-coding/internal/lockfile"
 	"github.com/z-fenix/mulix-coding/internal/sessionctx"
 	"github.com/z-fenix/mulix-coding/internal/state"
+	"github.com/z-fenix/mulix-coding/internal/tracker"
 )
 
 func hookPayload(t *testing.T, root, id, tool, path string) []byte {
@@ -32,6 +35,161 @@ func hookPayload(t *testing.T, root, id, tool, path string) []byte {
 	}
 	return b
 }
+func TestHookCLIHelper(t *testing.T) {
+	if os.Getenv("MULIX_TEST_HOOK_PROCESS") != "1" {
+		return
+	}
+	cmd := NewRootCmd()
+	cmd.SetArgs([]string{"hook"})
+	if err := cmd.Execute(); err != nil {
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func TestHookCLILegacyModeRejectsInvalidNativeArtifacts(t *testing.T) {
+	root := chdirTemp(t)
+	initMulixRoot(t, root)
+	if err := tracker.SaveConfig(root, tracker.Target{Kind: "markdown"}); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runPresetCLI(t, "new", "native hook"); err != nil {
+		t.Fatalf("new: %s %v", out, err)
+	}
+	id, err := state.Active(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invoke := func() (int, string) {
+		t.Helper()
+		cmd := exec.Command(os.Args[0], "-test.run=^TestHookCLIHelper$")
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "MULIX_TEST_HOOK_PROCESS=1")
+		cmd.Stdin = bytes.NewReader(hookPayload(t, root, "", "Write", "src/example.go"))
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			return 0, string(out)
+		}
+		if exit, ok := err.(*exec.ExitError); ok {
+			return exit.ExitCode(), string(out)
+		}
+		t.Fatal(err)
+		return -1, ""
+	}
+	spec := filepath.Join(root, ".mulix", ".runtime", id, "spec.md")
+	if err := os.Symlink(filepath.Join(t.TempDir(), "missing"), spec); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	code, out := invoke()
+	if code != 2 || !strings.Contains(out, "unsafe runtime artifact") {
+		t.Errorf("linked native spec: exit %d output %s", code, out)
+	}
+	if err := os.Remove(spec); err != nil {
+		t.Fatal(err)
+	}
+	p := state.PathFor(root, id)
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(strings.Replace(string(data), "runtime-issues-v1", "unknown-layout", 1)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	code, out = invoke()
+	if code != 2 || !strings.Contains(out, "unknown artifact_layout") {
+		t.Errorf("unknown native layout: exit %d output %s", code, out)
+	}
+	if out := evaluatePreToolUse(context.Background(), root, hookPayload(t, root, "", "Write", "src/example.go")); !errors.Is(out.Cause, state.ErrInvalidArtifacts) {
+		t.Errorf("native artifact sentinel lost through context: %v", out.Cause)
+	}
+	malformed := strings.Replace(string(data), "artifact_layout: runtime-issues-v1", "artifact_layout: [runtime-issues-v1]", 1)
+	if err := os.WriteFile(p, []byte(malformed), 0644); err != nil {
+		t.Fatal(err)
+	}
+	code, out = invoke()
+	if code != 2 || !strings.Contains(out, "invalid native artifact metadata") {
+		t.Errorf("invalid layout shape: exit %d output %s", code, out)
+	}
+	for _, tc := range []struct{ name, content string }{
+		{"malformed-native", string(data) + "tasks_dir: [\n"},
+		{"malformed-layout-only", "artifact_layout: [\n"},
+		{"malformed-tasks-only", "tasks_dir: [\n"},
+		{"malformed-tracker-only", "tracker: [\n"},
+		{"invalid-schema", strings.Replace(string(data), "schema: mulix.state.v2", "schema: invalid", 1)},
+		{"invalid-phase", strings.Replace(string(data), "phase: specify", "phase: invalid", 1)},
+	} {
+		if tc.content == string(data) {
+			t.Fatalf("%s fixture unchanged", tc.name)
+		}
+		if err := os.WriteFile(p, []byte(tc.content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		code, out = invoke()
+		if code != 2 || !strings.Contains(out, "invalid native artifact metadata") {
+			t.Errorf("%s: exit %d output %s", tc.name, code, out)
+		}
+	}
+	quoted := string(data)
+	for _, key := range []string{"artifact_layout", "tasks_dir", "tracker"} {
+		quoted = strings.Replace(quoted, "\n"+key+":", "\n\""+key+"\":", 1)
+	}
+	quoted = "  " + strings.ReplaceAll(quoted, "\n", "\n  ") + "broken: [\n"
+	if err := os.Mkdir(filepath.Join(filepath.Dir(p), "issues", ".probe"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(quoted), 0644); err != nil {
+		t.Fatal(err)
+	}
+	code, out = invoke()
+	if code != 2 || !strings.Contains(out, "invalid native artifact metadata") {
+		t.Errorf("malformed indented quoted native state with issues/.probe directory: exit %d output %s", code, out)
+	}
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	code, out = invoke()
+	if code != 2 || !strings.Contains(out, "invalid native artifact metadata") {
+		t.Errorf("missing native state: exit %d output %s", code, out)
+	}
+
+	legacy := flow.New("legacy-malformed", "")
+	legacy.Phase = flow.PhaseBuild
+	if err := state.Save(root, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SetActive(root, legacy.Change); err != nil {
+		t.Fatal(err)
+	}
+	p = state.PathFor(root, legacy.Change)
+	issues := filepath.Join(filepath.Dir(p), "issues")
+	if err := os.Mkdir(issues, 0755); err != nil {
+		t.Fatal(err)
+	}
+	code, out = invoke()
+	if code != 0 {
+		t.Errorf("valid legacy state misclassified: exit %d output %s", code, out)
+	}
+	if err := os.Remove(issues); err != nil {
+		t.Fatal(err)
+	}
+	for _, legacy := range []string{"schema: [\n", "# artifact_layout: runtime-issues-v1\nschema: [\n", "nested:\n  tracker: x\nschema: [\n"} {
+		if err := os.WriteFile(p, []byte(legacy), 0644); err != nil {
+			t.Fatal(err)
+		}
+		code, out = invoke()
+		if code != 0 {
+			t.Errorf("malformed legacy state must fail open: exit %d output %s", code, out)
+		}
+	}
+	if err := state.SetActive(root, "missing"); err != nil {
+		t.Fatal(err)
+	}
+	code, out = invoke()
+	if code != 0 {
+		t.Errorf("legacy generic load failure no longer fail-open: exit %d %s", code, out)
+	}
+}
+
 func TestHookEval_SessionBindingAndDynamicFallback(t *testing.T) {
 	root, s := sessionProject(t)
 	x, _ := state.Load(root, "X")

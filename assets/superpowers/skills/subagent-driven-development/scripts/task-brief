@@ -3,7 +3,7 @@
 # implementer reads in one call, so the task text never has to be pasted
 # through the controller's context.
 #
-# Usage: task-brief [-C DIR] PLAN_FILE TASK_NUMBER [OUTFILE]
+# Usage: task-brief [-C DIR] PLAN_PATH TASK_NUMBER [OUTFILE (legacy only)]
 # Default OUTFILE: <repo-root>/.mulix/.runtime/<change>/sdd/<plan-basename>/task-<N>-brief.md
 # (per plan and per worktree; concurrent runs of the SAME plan in the same
 # working tree share it). -C DIR runs as if started in DIR, as in sdd-workspace.
@@ -17,12 +17,44 @@ if [ "${1:-}" = "-C" ]; then
 fi
 
 if [ $# -lt 2 ] || [ $# -gt 3 ]; then
-  echo "usage: task-brief [-C DIR] PLAN_FILE TASK_NUMBER [OUTFILE]" >&2
+  echo "usage: task-brief [-C DIR] PLAN_PATH TASK_NUMBER [OUTFILE (legacy only)]" >&2
   exit 2
 fi
 
 plan=$1
 n=$2
+if [ $# -eq 3 ]; then
+  # The standalone legacy extractor still accepts OUTFILE outside Mulix.
+  # In a Mulix project, don't let that argument bypass the native plan.
+  probe=$PWD
+  while [ ! -d "$probe/.mulix" ]; do
+    parent=$(dirname "$probe")
+    [ "$parent" != "$probe" ] || break
+    probe=$parent
+  done
+  approved_dir=""
+  if [ -d "$probe/.mulix" ]; then
+    approved_dir=$(mulix context show --field tasks-dir) || exit 1
+  fi
+  if [ -n "$approved_dir" ] || [ -d "$plan" ]; then
+    printf 'task-brief: native task briefs are written only in their SDD workspace\n' >&2
+    exit 2
+  fi
+elif [ -d "$plan" ]; then
+  case "$n" in ''|0*|*[!0-9]*) printf 'task-brief: expected a positive task number\n' >&2; exit 2 ;; esac
+  dir=$("${BASH:-bash}" "$here/sdd-workspace" "$plan")
+  out="$dir/task-${n}-brief.md"
+  if [ -L "$out" ] || { [ -e "$out" ] && [ ! -f "$out" ]; }; then
+    printf 'task-brief: refusing unsafe brief path %s\n' "$out" >&2
+    exit 2
+  fi
+  tmp=$(mktemp "$dir/.task-brief.XXXXXX")
+  trap 'rm -f -- "$tmp"' EXIT
+  mulix _task-input "$n" --plan-path "$plan" > "$tmp"
+  mv -f -- "$tmp" "$out"
+  printf 'wrote %s: %s lines\n' "$out" "$(wc -l < "$out" | tr -d ' ')"
+  exit 0
+fi
 [ -f "$plan" ] || { echo "no such plan file: $plan" >&2; exit 2; }
 
 if [ $# -eq 3 ]; then

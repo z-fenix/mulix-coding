@@ -10,7 +10,7 @@ import (
 func TestUpdate_ReportsMissingSessionIntegrationWithoutEditingSettings(t *testing.T) {
 	root, s := sessionProject(t)
 	selectForSession(t, s, "A", "Y")
-	if _, err := runPresetCLI(t, "init"); err != nil {
+	if _, err := runPresetCLI(t, "_setup", "--host", "claude", "--tracker", "markdown"); err != nil {
 		t.Fatal(err)
 	}
 	p := filepath.Join(root, ".claude", "settings.json")
@@ -21,7 +21,7 @@ func TestUpdate_ReportsMissingSessionIntegrationWithoutEditingSettings(t *testin
 	contextBefore, _ := os.ReadFile(filepath.Join(root, ".mulix", "context.json"))
 	for _, args := range [][]string{{"update"}, {"update", "--force"}} {
 		out, err := runPresetCLI(t, args...)
-		if err != nil || !strings.Contains(out, "mulix init --host claude") {
+		if err != nil || !strings.Contains(out, "setup-mulix skill") {
 			t.Fatalf("upgrade guidance: %s %v", out, err)
 		}
 		after, _ := os.ReadFile(p)

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/z-fenix/mulix-coding/internal/quality"
+	"github.com/z-fenix/mulix-coding/internal/tracker"
 )
 
 // VerifyResult tracks the outcome of the most recent verify phase run.
@@ -80,6 +81,10 @@ type State struct {
 
 	Phase Phase `yaml:"phase"`
 
+	ArtifactLayout string                 `yaml:"artifact_layout,omitempty"`
+	TasksDir       string                 `yaml:"tasks_dir,omitempty"`
+	Tracker        *tracker.ChangeBinding `yaml:"tracker,omitempty"`
+
 	SpecPath   string `yaml:"spec_path,omitempty"`
 	TasksPath  string `yaml:"tasks_path,omitempty"`
 	ReportPath string `yaml:"report_path,omitempty"`
@@ -135,6 +140,28 @@ func (s *State) invalidateVerification() {
 			s.QualityRuns[i].Error = "verification invalidated by phase transition; run mulix verify again"
 		}
 	}
+}
+
+// RuntimeIssuesLayout identifies configured changes with per-issue artifacts.
+const RuntimeIssuesLayout = "runtime-issues-v1"
+
+// PlanPath returns the issue directory for configured changes and the legacy plan file otherwise.
+func (s State) PlanPath() string {
+	if s.ArtifactLayout == RuntimeIssuesLayout {
+		return s.TasksDir
+	}
+	return s.TasksPath
+}
+
+// QualityProject supplies the pinned inputs to every quality consumer.
+func (s State) QualityProject(root string) quality.Project {
+	p := quality.Project{Root: root, Change: s.Change, SpecPath: s.SpecPath, ReportPath: s.ReportPath}
+	if s.ArtifactLayout == RuntimeIssuesLayout {
+		p.TasksDir = s.PlanPath()
+	} else {
+		p.TasksPath = s.PlanPath()
+	}
+	return p
 }
 
 // New returns a fresh State for a newly created change, starting in the

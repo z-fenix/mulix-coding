@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Close one inline task: check its evidence, refresh its brief, then append a
-# sectioned completion record. In mulix, pass `mulix test receipt --task N`
+# Close one inline task: check its evidence and refresh its brief before
+# appending a sectioned completion record. In mulix, pass `mulix test receipt --task N`
 # after the actual GREEN/CHECK has run. A failed check or refresh cannot close
 # the task; the helper does not create a native execution receipt itself.
-# Usage: task-done PLAN_FILE TASK_NUMBER BASE -- TEST_COMMAND [ARGS...]
+# Usage: task-done PLAN_PATH TASK_NUMBER BASE -- TEST_COMMAND [ARGS...]
+# Native plans require the exact current-receipt command; legacy plans keep
+# the generic test-command interface.
 set -euo pipefail
 
 if [ $# -lt 5 ] || [ "$4" != "--" ]; then
-  echo "usage: task-done PLAN_FILE TASK_NUMBER BASE -- TEST_COMMAND [ARGS...]" >&2
+  echo "usage: task-done PLAN_PATH TASK_NUMBER BASE -- TEST_COMMAND [ARGS...]" >&2
   exit 2
 fi
 
@@ -21,6 +23,24 @@ git rev-parse --verify --quiet "$base" >/dev/null || { echo "bad BASE: $base" >&
 
 dir=$("${BASH:-bash}" "$sdd/sdd-workspace" "$plan")
 log="$dir/task-${n}-tests.log"
+native_plan=false
+if [ -d "$plan" ]; then
+  native_plan=true
+  case "$n" in ''|0*|*[!0-9]*) printf 'task-done: expected a positive task number\n' >&2; exit 2 ;; esac
+  if [ "$#" -ne 5 ] || [ "$1" != mulix ] || [ "$2" != test ] ||
+    [ "$3" != receipt ] || [ "$4" != --task ] || [ "$5" != "$n" ]; then
+    printf 'task-done: native Task %s requires mulix test receipt --task %s\n' "$n" "$n" >&2
+    exit 2
+  fi
+  if [ -L "$log" ] || { [ -e "$log" ] && [ ! -f "$log" ]; }; then
+    printf 'task-done: refusing unsafe receipt log path %s\n' "$log" >&2
+    exit 2
+  fi
+  # Check the receipt after refreshing the approved brief, not before a
+  # potentially newer task definition is read.
+  "${BASH:-bash}" "$sdd/task-brief" "$plan" "$n" >/dev/null
+  set -- "$@" --plan-path "$plan" --id-only
+fi
 
 # Shell quoting keeps arguments (including newlines) on one readable line.
 printf -v cmd '%q ' "$@"
@@ -36,8 +56,18 @@ if [ "$rc" -ne 0 ]; then
 fi
 
 last=$(grep -v '^[[:space:]]*$' "$log" | tail -n 1) || last="(no output)"
-# Refresh only this task from the approved plan before recording completion.
-"${BASH:-bash}" "$sdd/task-brief" "$plan" "$n" >/dev/null
+line="- Task $n: complete"
+if [ "$native_plan" = true ]; then
+  receipt=$(< "$log")
+  if ! [[ "$receipt" =~ ^[0-9a-f]{32}$ ]]; then
+    printf 'task-done: Task %s returned no single valid receipt ID\n' "$n" >&2
+    exit 2
+  fi
+  line="$line (receipt $receipt)"
+else
+  # Legacy briefs reflect checkbox edits from the caller's test command.
+  "${BASH:-bash}" "$sdd/task-brief" "$plan" "$n" >/dev/null
+fi
 ledger=$("${BASH:-bash}" "$sdd/progress-init" "$plan")
 
 # A longer delimiter keeps literal backticks in commands and results intact.
@@ -49,7 +79,6 @@ code_span() {
 
 last_heading=$(grep -E '^#{2,3} ' "$ledger" | tail -n 1 | tr -d '\r') || last_heading=""
 last_phase=$(grep '^## ' "$ledger" | tail -n 1 | tr -d '\r') || last_phase=""
-line="- Task $n: complete"
 {
   # Separate appended content even when a legacy ledger has no final LF.
   printf '\n\n'

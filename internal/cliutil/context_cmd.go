@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/z-fenix/mulix-coding/internal/flow"
 	"github.com/z-fenix/mulix-coding/internal/sessionctx"
 )
 
@@ -17,22 +20,44 @@ func newContextCmd() *cobra.Command {
 		if jsonOutput && field != "" {
 			return fmt.Errorf("--json and --field are mutually exclusive")
 		}
-		if field != "" && field != "runtime-dir" && field != "scratch-dir" {
+		switch field {
+		case "", "runtime-dir", "scratch-dir", "tasks-dir", "sdd-context":
+		default:
 			return fmt.Errorf("unsupported context field %q", field)
 		}
-		_, r, err := resolveCommandContext(cmd, "", sessionctx.Inspect)
+		store, r, err := resolveCommandContext(cmd, "", sessionctx.Inspect)
 		if err != nil {
 			return err
 		}
-		if field == "runtime-dir" {
+		if field == "runtime-dir" || field == "sdd-context" {
 			if r.RuntimeDir == "" {
 				return fmt.Errorf("no current change; use mulix new or mulix state select <change> before creating runtime artifacts")
 			}
-			fmt.Println(r.RuntimeDir)
+			if field == "runtime-dir" {
+				fmt.Println(r.RuntimeDir)
+				return nil
+			}
+			// Internal line record for Bash 3.2 without a JSON dependency:
+			// layout, absolute runtime directory, and relative native plan.
+			// Use this single selection snapshot for all three fields.
+			mode, plan := "legacy", ""
+			if r.State != nil && r.State.ArtifactLayout == flow.RuntimeIssuesLayout {
+				mode, plan = "native", r.State.PlanPath()
+			}
+			if strings.ContainsAny(r.RuntimeDir, "\r\n") || strings.ContainsAny(plan, "\r\n") {
+				return fmt.Errorf("SDD context paths must not contain newlines")
+			}
+			fmt.Printf("%s\n%s\n%s\n", mode, r.RuntimeDir, plan)
 			return nil
 		}
 		if field == "scratch-dir" {
 			fmt.Println(r.ScratchDir)
+			return nil
+		}
+		if field == "tasks-dir" {
+			if r.State != nil && r.State.ArtifactLayout == flow.RuntimeIssuesLayout {
+				fmt.Println(filepath.Join(store.Root(), filepath.FromSlash(r.State.PlanPath())))
+			}
 			return nil
 		}
 		if jsonOutput {
@@ -48,7 +73,7 @@ func newContextCmd() *cobra.Command {
 		return nil
 	}}
 	show.Flags().BoolVar(&jsonOutput, "json", false, "print stable JSON")
-	show.Flags().StringVar(&field, "field", "", "print one field (runtime-dir, scratch-dir)")
+	show.Flags().StringVar(&field, "field", "", "print one field (runtime-dir, scratch-dir, tasks-dir)")
 	mode := &cobra.Command{Use: "mode <legacy|session>", Args: cobra.ExactArgs(1), Short: "Set project context mode without changing bindings", RunE: func(cmd *cobra.Command, args []string) error {
 		s, err := sessionctx.Open(".")
 		if err != nil {

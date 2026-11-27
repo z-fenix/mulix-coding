@@ -24,7 +24,8 @@ func newUpdateCmd() *cobra.Command {
 			"file and vendor baseline, and require manual action. Resolve the sidecar " +
 			"candidate into the reported target, then use repeatable --accept <file>; " +
 			"accept only advances an existing pending update, not unknown legacy content. " +
-			"Force overwrites managed content only after protective backups succeed.",
+			"Force overwrites managed content only after protective backups succeed. " +
+			"An obsolete Issue exporter is only removed if it is a verified unmodified vendor copy without a pending conflict, even with force.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := state.FindRoot(".")
 			if err != nil {
@@ -42,7 +43,7 @@ func newUpdateCmd() *cobra.Command {
 			if needed, err := scaffold.NeedsSessionHook(root); err != nil {
 				fmt.Fprintf(os.Stderr, "note: could not inspect session hook integration: %v\n", err)
 			} else if needed {
-				fmt.Println("note: session startup integration is missing; run mulix init --host claude explicitly to merge hooks. update has not changed settings.")
+				fmt.Println("note: session startup integration is missing; run the setup-mulix skill and select claude to merge hooks. update has not changed settings.")
 			}
 			return nil
 		},

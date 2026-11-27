@@ -52,6 +52,15 @@ func changeCandidate(date, slug string, attempt int) string {
 }
 
 func createChangeDirAt(root, title string, now time.Time) (NewChange, error) {
+	return createChangeDirAtLayout(root, title, now, false)
+}
+
+// CreateRuntimeIssueChangeDir reserves an ID without creating legacy docs directories.
+func CreateRuntimeIssueChangeDir(root, title string) (NewChange, error) {
+	return createChangeDirAtLayout(root, title, time.Now(), true)
+}
+
+func createChangeDirAtLayout(root, title string, now time.Time, runtimeIssues bool) (NewChange, error) {
 	slug := Slugify(title)
 	if slug == "" {
 		return NewChange{}, fmt.Errorf("scaffold: %q has no usable slug characters", title)
@@ -62,8 +71,10 @@ func createChangeDirAt(root, title string, now time.Time) (NewChange, error) {
 		if err != nil {
 			return NewChange{}, err
 		}
-		if err := os.MkdirAll(filepath.Dir(probe), 0o755); err != nil {
-			return NewChange{}, fmt.Errorf("scaffold: creating %s: %w", parent, err)
+		if !runtimeIssues || parent == layout.RuntimeDir {
+			if err := os.MkdirAll(filepath.Dir(probe), 0o755); err != nil {
+				return NewChange{}, fmt.Errorf("scaffold: creating %s: %w", parent, err)
+			}
 		}
 	}
 	for attempt := 1; ; attempt++ {
@@ -97,7 +108,25 @@ func createChangeDirAt(root, title string, now time.Time) (NewChange, error) {
 		}
 		created := []string{runtime}
 		retry := false
-		for _, dir := range dirs[1:] {
+		createDirs := dirs[1:]
+		if runtimeIssues {
+			// Recheck legacy collisions after reserving the runtime name.
+			for _, dir := range dirs[1:3] {
+				if _, err := os.Lstat(dir); err == nil {
+					retry = true
+					break
+				} else if !os.IsNotExist(err) {
+					_ = os.Remove(runtime)
+					return NewChange{}, fmt.Errorf("scaffold: inspecting candidate %s: %w", dir, err)
+				}
+			}
+			createDirs = []string{filepath.Join(runtime, layout.TestsDir), filepath.Join(runtime, layout.RuntimeIssuesDir)}
+		}
+		if retry {
+			_ = os.Remove(runtime)
+			continue
+		}
+		for _, dir := range createDirs {
 			if err := os.Mkdir(dir, 0o755); err != nil {
 				// Remove only this attempt's new empty directories, never recursively.
 				for i := len(created) - 1; i >= 0; i-- {

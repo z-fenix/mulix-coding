@@ -107,6 +107,13 @@ digraph process {
 
 ## Setup
 
+**Under Mulix**, `PLAN_FILE` is the approved plan path. Use the whole
+`issues/` directory returned by `mulix context show --field tasks-dir` in
+this session for a native change; a legacy change uses its `tasks.md` file.
+For native changes, read context from `spec.md` and the numbered task
+documents. Pass the same directory to all task and review helpers; there
+is no combined plan file. Keep step progress in the ledger.
+
 Ensure the work happens in an isolated workspace: use
 using-git-worktrees to create one or verify the existing one.
 Never start implementation on a main/master branch without your human
@@ -126,21 +133,21 @@ and the new one resumes from the same ledger.
   `../subagent-driven-development/scripts/sdd-workspace PLAN_FILE` by its
   absolute path, from the working tree you're executing in — it
   prints the plan's git-ignored directory
-  (`<repo-root>/.mulix/.runtime/<change>/sdd/<plan-basename>/`), home to every
+  (`<mulix-root>/.mulix/.runtime/<change>/sdd/<plan-basename>/`), home to every
   artifact for THIS plan: ledger, briefs, review packages. Another plan's
   directory is never yours to read or write.
 - Check for this plan's ledger at `<workspace>/progress.md`. If its first
-  line names your plan file, tasks with a `- Task <N>: complete` line are
-  DONE — do not redo them; resume at the first task without one. Their
-  commits exist in git even when your context no longer remembers making
-  them: after compaction, trust the ledger and `git log` over your own
-  recollection. A ledger whose first line names a different plan file is
-  another plan's progress: leave it and start your own, fresh.
+  line names your plan path, resume at the first task without current closure.
+  Native closure names the latest GREEN/CHECK receipt. A retry or changed
+  task definitions can make old entries historical. Legacy `- Task <N>: complete`
+  records still count in legacy plans. After compaction, use the ledger and
+  `git log` rather than recollection.
+  Leave a ledger that names another plan untouched.
 - Initialize the ledger with `bash ../subagent-driven-development/scripts/progress-init PLAN_FILE`
   (path relative to this skill directory), then follow
   [the shared ledger format](../subagent-driven-development/progress-format.md).
-  It preserves the first-line identity and all existing history. On resume,
-  both Markdown list items and legacy plain completion lines count.
+  It preserves the first-line identity and all existing history. Native
+  closure requires a receipt ID; plain completion lines count only for legacy plans.
 - `git clean -fdx` will destroy the workspace (it's git-ignored scratch);
   if that happens, recover from `git log`.
 
@@ -232,16 +239,19 @@ the claim. If any item is missing, the task is not complete: finish it.
 
 Run `bash <skills-dir>/executing-plans/scripts/task-done PLAN_FILE N BASE -- mulix test receipt --task N`
 from the project root after the planned GREEN/CHECK has executed. The helper
-keeps the receipt-check output in the workspace. Only if the receipt is current, it refreshes this task's brief from the approved plan via
-`task-brief`, then appends the completion list item to the ledger:
+keeps the receipt-check output in the workspace. Both the `task-brief`
+refresh and the receipt check must succeed before it appends the completion
+list item to the ledger:
 
-`- Task <N>: complete (commits <base7>..<head7>, tests: <command> → <result>)`
+Native completion is `- Task N: complete (receipt <id>)`, with the exact
+validated receipt ID. Legacy completion keeps `- Task N: complete`.
+The command, result, and commit range follow as separate ledger items.
 
-The plan owns step status; the brief is a derived snapshot. Under mulix,
-record each verified step in tasks.md as mulix-build requires before
-calling task-done. Skipped/unperformed steps and fenced examples keep their
-original markers. A brief refresh failure records no completion; resolve
-it before continuing.
+For a native task directory, record verified steps in that task's ledger
+section, without editing task Markdown. For a legacy `tasks.md`, mark only
+verified steps in that file; skipped steps and fenced examples keep their
+original markers. A failed receipt check or brief refresh records no
+completion; resolve it before continuing.
 
 A failing run records nothing; the task is not complete. When it records,
 mark the todo complete and take the next task.

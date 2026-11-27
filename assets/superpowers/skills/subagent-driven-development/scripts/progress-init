@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Create a sectioned ledger for one plan, or leave its existing history intact.
-# Usage: progress-init PLAN_FILE
+# Usage: progress-init PLAN_PATH
 set -euo pipefail
 
 if [ $# -ne 1 ]; then
-  echo "usage: progress-init PLAN_FILE" >&2
+  echo "usage: progress-init PLAN_PATH" >&2
   exit 2
 fi
 
@@ -12,6 +12,22 @@ plan=$1
 scripts=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 dir=$("${BASH:-bash}" "$scripts/sdd-workspace" "$plan")
 ledger="$dir/progress.md"
+
+if [ -d "$plan" ]; then
+  plan=$(< "$dir/plan-path")
+  if [ -L "$ledger" ] || { [ -e "$ledger" ] && [ ! -f "$ledger" ]; }; then
+    printf 'progress-init: refusing unsafe ledger path %s\n' "$ledger" >&2
+    exit 2
+  fi
+  if [ -f "$ledger" ]; then
+    IFS= read -r first < "$ledger" || true
+    first=${first%$'\r'}
+    if [ "$first" != "# SDD progress — plan: $plan" ] && [ "$first" != "# SDD ledger — plan: $plan" ]; then
+      printf 'progress-init: existing ledger does not name %s\n' "$plan" >&2
+      exit 2
+    fi
+  fi
+fi
 
 if [ ! -e "$ledger" ]; then
   # The identity line stays machine-readable; the remaining template is literal.

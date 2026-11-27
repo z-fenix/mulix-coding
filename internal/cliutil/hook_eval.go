@@ -10,6 +10,7 @@ import (
 
 	"github.com/z-fenix/mulix-coding/internal/hook"
 	"github.com/z-fenix/mulix-coding/internal/sessionctx"
+	"github.com/z-fenix/mulix-coding/internal/state"
 )
 
 type hookOutcome struct {
@@ -19,11 +20,15 @@ type hookOutcome struct {
 }
 
 func contextFailure(r sessionctx.Resolved, cause error) hookOutcome {
-	allow := r.Root == "" || r.Mode == sessionctx.Legacy
+	allow := (r.Root == "" || r.Mode == sessionctx.Legacy) && !errors.Is(cause, state.ErrInvalidArtifacts)
+	next := "Repair the context with mulix context mode, state select --session-id <id>, or context unbind --session-id <id>; an invalid binding never falls back."
+	if errors.Is(cause, state.ErrInvalidArtifacts) {
+		next = "Repair the invalid native artifact layout or remove the unsafe link before writing."
+	}
 	return hookOutcome{Resolved: r, Cause: cause, Decision: hook.Decision{
 		Allow:  allow,
 		Reason: fmt.Sprintf("change=%s phase=%s source=%s: %v", r.Change, r.Phase, r.Source, cause),
-		Next:   "Repair the context with mulix context mode, state select --session-id <id>, or context unbind --session-id <id>; an invalid binding never falls back.",
+		Next:   next,
 	}}
 }
 

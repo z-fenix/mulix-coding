@@ -100,6 +100,13 @@ digraph process {
 
 ## Setup
 
+**Under Mulix**, `PLAN_FILE` is the approved plan path. Use the whole
+`issues/` directory returned by `mulix context show --field tasks-dir` in
+this session for a native change; a legacy change uses its `tasks.md` file.
+For native changes, read context from `spec.md` and the numbered task
+documents. Pass the same directory to all task and review helpers; there
+is no combined plan file. Keep step progress in the ledger.
+
 Ensure the work happens in an isolated workspace: use
 using-git-worktrees to create one or verify the existing one.
 Never start implementation on a main/master branch without your human
@@ -113,7 +120,7 @@ a ledger file, not only in todos.
 - Each plan owns a workspace: at skill start, run this skill's
   `bash scripts/sdd-workspace PLAN_FILE` by its absolute path, from the
   working tree you're executing in — it prints the plan's git-ignored
-  directory (under `<repo-root>/.mulix/.runtime/<change>/sdd/`), home to
+  directory (under `<mulix-root>/.mulix/.runtime/<change>/sdd/`), home to
   every artifact for THIS plan: ledger, briefs, reports, review packages.
   Another plan's directory is never yours to read or write.
 - Check for this plan's ledger at `<workspace>/progress.md`. If one exists,
@@ -122,8 +129,8 @@ a ledger file, not only in todos.
 - Initialize the ledger with `bash ../subagent-driven-development/scripts/progress-init PLAN_FILE`
   (path relative to this skill directory), then follow
   [the shared ledger format](../subagent-driven-development/progress-format.md).
-  It preserves the first-line identity and all existing history. On resume,
-  both Markdown list items and legacy plain completion lines count.
+  It preserves the first-line identity and all existing history. Native
+  closure requires a receipt ID; plain completion lines count only for legacy plans.
 - The ledger is your recovery map: the commits it names exist in git even
   when your context no longer remembers creating them. After compaction,
   trust the ledger and `git log` over your own recollection.
@@ -210,7 +217,7 @@ and fix-round diffs need it.
   brief stays the single source of
   requirements. Your dispatch should contain: (1) one line on where this
   task fits in the project; the approved PLAN_FILE path and task number
-  for status-only edits under mulix-build; (2) the brief path, introduced as "read this
+  for step tracking; (2) the brief path, introduced as "read this
   first — it is your requirements, with the exact values to use verbatim";
   (3) interfaces and decisions from earlier tasks that the brief cannot
   know; (4) your resolution of any ambiguity you noticed in the brief;
@@ -313,13 +320,20 @@ round writes, and your memory of it does not survive compaction.
 When the review comes back clean — or every open finding is parked with a
 ruling at the cap — refresh this task's brief from the approved plan first:
 `bash scripts/task-brief PLAN_FILE N` (from this skill's directory).
-The plan owns step status; the brief is a derived snapshot. Under mulix,
-the implementer records only verified steps in tasks.md as mulix-build
-requires. Preserve skipped/unperformed steps and fenced examples; a clean
-review does not prove every step ran. If extraction fails, resolve it
-before recording completion. After refresh succeeds, check the existing GREEN/CHECK with
-`mulix test receipt --task N`; repeat execution only if the receipt is missing
-or invalid. Then append the completion list item with your other bookkeeping:
+For a native task directory, record the implementer's observed step results
+in its section of `progress.md`. Leave task documents unchanged. For a legacy
+`tasks.md`, the implementer marks only verified steps in that file; preserve
+skipped steps and fenced examples. If extraction fails, resolve it before
+recording completion.
+
+For a native directory, run
+`mulix test receipt --task N --plan-path "$PLAN_FILE" --id-only`.
+Only on success, use the exact returned ID in `- Task N: complete (receipt <id>)`.
+Record review status and other details under that line. A new runner receipt
+needs its own closure; keep previous entries as history.
+
+For a legacy `tasks.md`, run `mulix test receipt --task N` and append one of
+these items only on success:
 
 - `- Task <N>: complete (commits <base7>..<head7>, review clean)`
 - `- Task <N>: complete (commits <base7>..<head7>, <K> parked)` after a

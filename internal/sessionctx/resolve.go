@@ -22,15 +22,31 @@ func (s *Store) Resolve(ctx context.Context, req ResolveRequest) (Resolved, erro
 	if err := ValidateIdentity(req.Identity); err != nil {
 		return r, err
 	}
+	closingArchive := req.Access == CloseArchivedSpec
+	if closingArchive && req.ExplicitChange == "" {
+		return r, fmt.Errorf("closing an archived spec requires an explicit --change")
+	}
+	mutating := req.Access == Mutate || closingArchive
 	// Snapshot pointers under the context lock; never wait for a change while
 	// holding it. A subsequent global switch only affects the next invocation.
-	err := lockfile.With(ctx, s.root, lockfile.ContextKey, func() error {
+	// A strictly read-only preview instead sees atomic file snapshots and may
+	// race a selection change; the writer must independently resolve again.
+	read := func(key string, fn func() error) error {
+		if req.Access == InspectReadOnly {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return fn()
+		}
+		return lockfile.With(ctx, s.root, key, fn)
+	}
+	err := read(lockfile.ContextKey, func() error {
 		var err error
 		r.Mode, err = s.modeUnlocked()
 		if err != nil {
 			return err
 		}
-		if req.ExplicitChange != "" && (req.Access == Inspect || r.Mode == Legacy || !req.Identity.Present) {
+		if req.ExplicitChange != "" && (!mutating || r.Mode == Legacy || !req.Identity.Present) {
 			r.Change, r.Source = req.ExplicitChange, ExplicitChange
 			return nil
 		}
@@ -72,7 +88,12 @@ func (s *Store) Resolve(ctx context.Context, req ResolveRequest) (Resolved, erro
 	if err != nil {
 		return r, err
 	}
-	if r.Mode == Session && req.Identity.Present && req.Access == Mutate && req.ExplicitChange != "" && req.ExplicitChange != r.Change {
+	if closingArchive && r.Change == "" {
+		// Archive normally clears global active. An unbound session may
+		// explicitly name the archived record in that case.
+		r.Change, r.Source = req.ExplicitChange, ExplicitChange
+	}
+	if r.Mode == Session && req.Identity.Present && mutating && req.ExplicitChange != "" && req.ExplicitChange != r.Change {
 		return r, &ResolveError{Kind: "binding-invalid", Err: fmt.Errorf("--change %q differs from current change %q; select it first", req.ExplicitChange, r.Change)}
 	}
 	if r.Change == "" {
@@ -83,7 +104,7 @@ func (s *Store) Resolve(ctx context.Context, req ResolveRequest) (Resolved, erro
 		return r, &ResolveError{Kind: "state-invalid", Err: err}
 	}
 	r.RuntimeDir = filepath.Join(s.root, filepath.FromSlash(layout.ChangeRuntimeDir(r.Change)))
-	err = lockfile.With(ctx, s.root, lockfile.ChangeKey(r.Change), func() error {
+	err = read(lockfile.ChangeKey(r.Change), func() error {
 		if _, err := fileutil.ControlPath(s.root, layout.ChangeRuntimePath(r.Change, layout.StateFile), false); err != nil {
 			return err
 		}
@@ -94,7 +115,10 @@ func (s *Store) Resolve(ctx context.Context, req ResolveRequest) (Resolved, erro
 		if r.Mode == Session && loaded.Change != r.Change {
 			return fmt.Errorf("state change %q does not match %q", loaded.Change, r.Change)
 		}
-		if r.Mode == Session && loaded.Archived && r.Source != ExplicitChange {
+		if closingArchive && !loaded.Archived {
+			return fmt.Errorf("spec Issue closure requires an archived change")
+		}
+		if r.Mode == Session && loaded.Archived && r.Source != ExplicitChange && !closingArchive {
 			return fmt.Errorf("change %q is archived; select another change or unbind", r.Change)
 		}
 		r.State, r.Phase = &loaded, loaded.Phase

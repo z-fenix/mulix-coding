@@ -14,13 +14,13 @@ specify → clarify → design → tasks → build → verify → archive
 
 | Phase   | Skill           | Embedded skill it runs                          | Output |
 |---------|-----------------|-------------------------------------------------|--------|
-| specify | `mulix-specify` | —                                               | `docs/specs/<change>/spec.md` |
-| clarify | `mulix-clarify` | —                                               | spec.md `## Clarifications` |
-| design  | `mulix-design`  | `brainstorming`                                 | approved design; `.mulix/.runtime/<change>/specs/*-design.md` (architectural) |
-| tasks   | `mulix-tasks`   | `writing-plans`                                 | `docs/changes/<change>/tasks.md` (`## Task N` plan) |
-| build   | `mulix-build`   | `test-driven-development` + `subagent-driven-development` or `executing-plans` | code, tests; `.mulix/.runtime/<change>/sdd/tasks/` (ledger, briefs, reports) |
-| verify  | `mulix-verify`  | `verification-before-completion`                | `docs/changes/<change>/report.md` |
-| archive | `mulix-archive` | `finishing-a-development-branch`                | merged / PR / kept |
+| specify | `mulix-specify` | —                                               | `spec_path`; publish a bound spec only for a remote tracker |
+| clarify | `mulix-clarify` | —                                               | spec `## Clarifications`; confirmed sync for a remote spec |
+| design  | `mulix-design`  | `brainstorming`                                 | approved design; `specs/*-design.md` under runtime (architectural) |
+| tasks   | `mulix-tasks`   | `writing-plans`                                 | `tasks_dir` task documents, or legacy `tasks_path` |
+| build   | `mulix-build`   | `test-driven-development` + `subagent-driven-development` or `executing-plans` | code, tests, receipts and `sdd/<plan>/` ledger |
+| verify  | `mulix-verify`  | `verification-before-completion`                | `report_path` and current verification receipt |
+| archive | `mulix-archive` | `finishing-a-development-branch`                | local archive; optional separately authorized spec close |
 
 1. On Claude Code, a **PreToolUse hook** checks only `Write`/`Edit`
    against the current phase's whitelist. Read a deny's reason and next
@@ -42,7 +42,32 @@ specify → clarify → design → tasks → build → verify → archive
    suites or interpreting receipts. Local records do not authenticate human
    consent, assertion quality or a writer controlling all files. `--force` with
    a nonempty `--reason` records a recovery bypass, never test qualification,
-   and cannot make an illegal event legal.
+   and cannot make an illegal event legal or bypass remote sync.
+
+## Resolve the change first
+
+Run `mulix state show` before choosing the phase skill. Use its phase and
+paths, not conversation history or the project's default tracker:
+
+| `artifact_layout` and `tracker` | Artifact and publication rules |
+| --- | --- |
+| `runtime-issues-v1`, `markdown` | Use the pinned `spec_path`, `tasks_dir` and `report_path`. All artifacts are local. |
+| `runtime-issues-v1`, `github` or `gitlab` | Same pinned paths. Publish only through the phase's `mulix tracker publish` dry run and authorized `--expect` command. Once bound, the Issue body is authoritative and its local snapshot is read-only to ordinary writers. |
+| Legacy (empty layout) | Use the existing spec, single `tasks_path` plan and report in `docs/`; run the existing local workflow without tracker commands. |
+
+For a remote change, the forward guards require the verified project and
+current spec Issue from `spec-complete`; `tasks-complete` through `archived`
+also require an exact, current binding for every task document. For drift,
+review `mulix tracker preview <spec|task-N>` and use `mulix tracker apply`
+only with authorization for that exact token. For a local conflict, review
+again with `--backup-local` and apply with the same flag and fresh token.
+Never substitute a different writer or `--force`. `verify-fail` is local
+recovery, not forward acceptance.
+
+Invoke the skill for the current phase before acting. `setup-mulix` installs
+unprefixed superpowers skills under `{{SKILLS_DIR}}/`, e.g. `brainstorming`.
+The phase skill replaces their hand-offs: pass the CLI gate before invoking
+an executor or the next phase's skill.
 
 ## Session context
 
@@ -79,12 +104,11 @@ snapshot; a switch affects the next call, not an already-running process.
 
 ## Runtime artifact policy
 
-- Retained change output is `.mulix/.runtime/<change>/state.yaml`, `specs/`
-  for approved design documents, `tests/` for authored Karate sources, and
-  `sdd/<plan>/` for execution records. Only build authors `tests/`; use
-  `mulix test run` for task scope and `mulix verify` for final scope. Karate
-  reports and rolling logs stay in scratch. The final verification report
-  is `docs/changes/<change>/report.md`.
+- Retained runtime output includes `state.yaml`, native `spec.md`, `issues/`
+  and `report.md`, `specs/` for approved design documents, `tests/` for
+  authored Karate sources, and `sdd/<plan>/` for execution records. Only build
+  authors `tests/`; use `mulix test run` for task scope and `mulix verify` for
+  final scope. Karate reports and rolling logs stay in scratch.
 - SDD uses the native files as needed: `plan-path`, `progress.md`,
   `task-N-brief.md`, `task-N-report.md`, `task-N-tests.log`, and
   `review-<base>..<head>.diff`, plus `sdd/.gitignore`. Keep the workspace
@@ -101,49 +125,15 @@ snapshot; a switch affects the next call, not an already-running process.
   `migrations/` and `_shared/` inside runtime are history, not new destinations.
   Init/update preserve those files and their sensitive-file ignore rules.
 
-## Before doing anything else
-
-Run `mulix state show` to see the active change's phase and the events
-legal from it. Don't assume the phase from conversation history — state
-lives on disk in `.mulix/.runtime/<change>/state.yaml`, not in your
-context.
-
-Then invoke the phase's skill from the table before taking any action
-in that phase. Each applies only while the active change is in its
-phase.
-
-## The embedded superpowers skills
-
-`mulix init` installs every superpowers skill as a project skill in
-`{{SKILLS_DIR}}/` (unprefixed: `brainstorming`, not
-`superpowers:brainstorming`). They keep their full discipline; mulix
-places retained artifacts under `.mulix/.runtime/`, transient material in
-context-scoped system scratch, and replaces their hand-offs with phase gates:
-
-- The phase skill decides when one runs. brainstorming ends at the
-  design gate, writing-plans at the tasks gate (no execution handoff),
-  the executors at build-complete (the branch is finished in archive).
-- Supporting skills apply whenever their trigger fires, in any phase:
-  `systematic-debugging` for any bug or unexpected failure,
-  `verification-before-completion` before any "done/fixed/passing" claim,
-  `receiving-code-review` when review feedback arrives,
-  `dispatching-parallel-agents` for independent investigations.
-- Outside a mulix change, companion/diagnostic tools use the valid no-change
-  scratch context. Plan executors need a selected change for retained SDD
-  records; an empty or invalid runtime query never creates shared output.
-
 ## Starting a new change
 
-`mulix new "<title>"` creates the change's spec directory
-(`docs/specs/<change>/`), change directory (`docs/changes/<change>/`),
-and runtime directory (`.mulix/.runtime/<change>/`) plus a fresh state in
-the specify phase, then selects it for the effective context: the current
-session in session mode with identity, otherwise global active. Do this before
-anything else for a new piece of work — don't start writing a spec by
-hand first. New IDs use the local date, e.g. `2026-10-14-add-login`,
-with `-2`, `-3` for same-day/title collisions. All three directories share
-that ID; filenames stay spec.md/tasks.md/report.md. Old `001-*` changes
-remain selectable with `mulix state select <change>`; don't rename them.
+`mulix new "<title>"` creates an owned runtime directory and state in
+specify, and selects it for the effective context. With tracker setup,
+it pins that project's tracker and native paths in the new state. In a
+project without tracker setup it creates the legacy docs directories instead.
+Start the change before drafting. IDs use the local date, e.g.
+`2026-10-14-add-login`, with `-2`, `-3` for collisions. Existing changes
+keep their IDs and layouts; select them as-is.
 
 ## Red flags — stop and reconsider
 

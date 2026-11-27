@@ -8,6 +8,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/z-fenix/mulix-coding/assets"
 	"github.com/z-fenix/mulix-coding/internal/layout"
@@ -142,6 +144,72 @@ func Init(opts InitOptions) (res InitResult, err error) {
 		return res, err
 	}
 	return res, nil
+}
+
+// PreflightNativeSetup checks every host that will retain the project-wide layout.
+func PreflightNativeSetup(root string, hosts []Host, force bool) error {
+	st, err := loadInstallState(root)
+	if err != nil {
+		return err
+	}
+	installed, err := installedHosts(root, st)
+	if err != nil {
+		return err
+	}
+	var checked []Host
+	for _, host := range allHosts {
+		if slices.Contains(hosts, host) {
+			if !force {
+				checked = append(checked, host)
+			}
+		} else if slices.Contains(installed, host) {
+			checked = append(checked, host)
+		}
+	}
+	if len(checked) == 0 {
+		return nil
+	}
+	files, err := managedFiles(checked)
+	if err != nil {
+		return err
+	}
+	sensitive := map[string]bool{
+		"executing-plans/SKILL.md":                           true,
+		"executing-plans/scripts/task-done":                  true,
+		"executing-plans/scripts/task-start":                 true,
+		"subagent-driven-development/SKILL.md":               true,
+		"subagent-driven-development/implementer-prompt.md":  true,
+		"subagent-driven-development/progress-format.md":     true,
+		"subagent-driven-development/references/resuming.md": true,
+		"subagent-driven-development/scripts/progress-init":  true,
+		"subagent-driven-development/scripts/review-package": true,
+		"subagent-driven-development/scripts/sdd-workspace":  true,
+		"subagent-driven-development/scripts/task-brief":     true,
+	}
+	for _, f := range files {
+		for _, h := range checked {
+			prefix := h.skillsDir() + "/"
+			if !strings.HasPrefix(f.Rel, prefix) {
+				continue
+			}
+			rel := strings.TrimPrefix(f.Rel, prefix)
+			phase := strings.HasPrefix(rel, "mulix-") && strings.HasSuffix(rel, "/SKILL.md")
+			if !phase && !sensitive[rel] {
+				continue
+			}
+			local, exists, err := readInstalledFile(root, f.Rel)
+			if err != nil {
+				return err
+			}
+			if !exists && slices.Contains(hosts, h) {
+				continue
+			}
+			if !exists || !bytes.Equal(local, f.Data) {
+				return fmt.Errorf("scaffold: %s is not the current managed workflow; reconcile with mulix update, then rerun setup", f.Rel)
+			}
+		}
+	}
+	return nil
 }
 
 // writeIfAbsentOrForced registers only bytes proven to equal bundled content.

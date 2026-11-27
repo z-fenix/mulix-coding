@@ -24,7 +24,7 @@ with jar.open('rb') as stream:
     assert hashlib.file_digest(stream, 'sha256').hexdigest() == jar_sha, 'wrong pinned JAR'
 
 with TemporaryDirectory(prefix='mulix Karate smoke ') as directory:
-    home = Path(directory)
+    home = Path(directory).resolve()
     root = home / 'project 源码'
     temp = home / 'scratch'
     root.mkdir(); temp.mkdir()
@@ -72,12 +72,16 @@ with TemporaryDirectory(prefix='mulix Karate smoke ') as directory:
         thread.start()
         try:
             env['SMOKE_URL'] = f'http://127.0.0.1:{server.server_port}'
-            cli('init', '--host', 'claude')
+            cli('_setup', '--host', 'claude', '--tracker', 'markdown')
             cli('new', 'Karate scope smoke')
             ctx = json.loads(cli('context', 'show', '--json'))
-            change = ctx['change']
             scratch = Path(ctx['scratch_dir']) / 'verification'
             runtime = Path(ctx['runtime_dir']).relative_to(root).as_posix()
+            fields = dict(line.split(':', 1) for line in cli('state', 'show').splitlines()
+                          if ':' in line and not line.startswith(' '))
+            assert fields['artifact_layout'].strip() == 'runtime-issues-v1'
+            spec, plan, report = (fields[name].strip() for name in ('spec_path', 'tasks_dir', 'report_path'))
+
             def karate_runs():
                 return set(scratch.glob('*-karate'))
 
@@ -95,11 +99,8 @@ with TemporaryDirectory(prefix='mulix Karate smoke ') as directory:
                 assert len(new) == 1, f'expected one Karate run, observed {len(new)}'
                 return cases(new.pop())
 
-            spec = f'docs/specs/{change}/spec.md'
-            change_dir = f'docs/changes/{change}'
-            plan = f'{change_dir}/tasks.md'
             put(spec, '# Smoke specification\nFR-001: Preserve API behavior.\n\n```mulix-acceptance\ncriteria:\n  - id: AC-001\n    requirement: FR-001\n    expected: Each endpoint returns its specified value.\n```\n')
-            state_set('spec_path', spec); transition('spec-complete')
+            transition('spec-complete')
             state_set('clarify_skipped', 'true'); transition('clarify-skipped')
             state_set('design_track', 'bounded'); state_set('design_approved', 'true'); transition('design-approved')
             first = 'features/task-1/first case.feature'
@@ -115,16 +116,26 @@ with TemporaryDirectory(prefix='mulix Karate smoke ') as directory:
             docs_case = dict(id='TC-003', criterion='AC-001', task=3, point='fixture docs', given='the API notes',
                              when='checking the documented route', then='its spelling is correct',
                              suite='docs', test='documented route', file='check-docs.py')
-            matrix = dict(tasks=[dict(number=1, kind='code'), dict(number=2, kind='code'),
-                                 dict(number=3, kind='documentation', reason='check the actual API notes')],
-                          cases=[case('TC-001', first, '值保持不变', 1), case('TC-002', second, 'second', 2), docs_case],
-                          verify_cases=[case('TC-004', final, 'joined flow')])
-            put(plan, '# Tasks\n\n```mulix-tests\n'+json.dumps(matrix, ensure_ascii=False)+'\n```\n\n## Task 1: Implement first endpoint\n\n## Task 2: Implement second endpoint\n\n## Task 3: Check docs\n')
+            def task_doc(n, filename, heading, task_case, *, kind='code', reason=None, final_case=None):
+                task = dict(number=n, kind=kind)
+                if reason is not None:
+                    task['reason'] = reason
+                matrix = dict(tasks=[task], cases=[task_case])
+                if final_case is not None:
+                    matrix['verify_cases'] = [final_case]
+                put(f'{plan}/{n:02d}-{filename}.md',
+                    f'## Task {n}: {heading}\n\n```mulix-tests\n' + json.dumps(matrix, ensure_ascii=False) + '\n```\n')
+
+            task_doc(1, 'first-endpoint', 'Implement first endpoint', case('TC-001', first, '值保持不变', 1))
+            task_doc(2, 'second-endpoint', 'Implement second endpoint', case('TC-002', second, 'second', 2),
+                     final_case=case('TC-004', final, 'joined flow'))
+            task_doc(3, 'check-docs', 'Check docs', docs_case,
+                     kind='documentation', reason='check the actual API notes')
             put('.mulix/quality.yaml', json.dumps(dict(schema='mulix.quality.v1', suites=[
                 dict(id='karate', format='karate-jsonl', karate=dict(version='2.1.5.RC1', sha256=jar_sha, environment='smoke', env=['SMOKE_URL'])),
                 dict(id='docs', format='json', cwd='.', command=[sys.executable, '-I', '-B', 'check-docs.py']),
             ])))
-            state_set('tasks_path', plan); transition('tasks-complete'); state_set('execution_method', 'inline')
+            transition('tasks-complete'); state_set('execution_method', 'inline')
             assert (root / runtime / 'tests').is_dir()
             for rel, name, endpoint, expected in [(first,'值保持不变','first',2),(second,'second','second',3),(final,'joined flow','joined',True)]:
                 put(runtime+'/tests/'+rel, f'''Feature: {endpoint}
@@ -144,21 +155,29 @@ And match response.value == {json.dumps(expected)}
             original = {f.relative_to(root).as_posix(): f.read_bytes() for f in (root/runtime/'tests').rglob('*') if f.is_file()}
             data = dict(first=0, second=0, joined=False)
             put('behavior.json', json.dumps(data))
+            def receipt(n):
+                token = cli('test', 'receipt', '--task', n, '--plan-path', plan, '--id-only').strip()
+                assert len(token) == 32 and all(ch in '0123456789abcdef' for ch in token)
+                return f'- Task {n}: complete (receipt {token})\n'
+
+            completions = []
             for n, key, value, file, name in [('1','first',2,first,'值保持不变'),('2','second',3,second,'second')]:
                 assert scenario_run('test','run','--task',n,'--stage','red') == [(file,name,False)]
                 data[key] = value; put('behavior.json', json.dumps(data))
                 assert scenario_run('test','run','--task',n,'--stage','green') == [(file,name,True)]
                 before = karate_runs()
-                assert 'current green receipt' in cli('test','receipt','--task',n)
+                completions.append(receipt(n))
                 assert karate_runs() == before, 'closure relaunched JAR'
             before = karate_runs()
             cli('test','run','--task','3','--stage','check')
-            cli('test','receipt','--task','3')
+            completions.append(receipt('3'))
             assert karate_runs() == before, 'non-Karate task ran the JAR'
-            put(f'{runtime}/sdd/tasks/progress.md', f'# SDD progress — plan: {plan}\n- Task 1: complete\n- Task 2: complete\n- Task 3: complete\n')
+            workspace = f'{runtime}/sdd/issues'
+            assert (root / workspace / 'plan-path').read_text(encoding='utf-8') == plan + '\n'
+            put(f'{workspace}/progress.md', f'# SDD progress — plan: {plan}\n' + ''.join(completions))
             transition('build-complete')
             assert karate_runs() == before
-            put(f'{change_dir}/report.md', '# Synthetic smoke review\n```mulix-review\nreviewer: smoke fixture\nresult: approved\nblocking: []\n```\n')
+            put(report, '# Synthetic smoke review\n```mulix-review\nreviewer: smoke fixture\nresult: approved\nblocking: []\n```\n')
             failed = scenario_run('verify', ok=False)
             assert sorted(failed) == sorted([(first,'值保持不变',True),(second,'second',True),(final,'joined flow',False)])
             transition('verify-pass', ok=False)

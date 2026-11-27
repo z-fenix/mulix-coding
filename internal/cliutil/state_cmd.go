@@ -37,6 +37,13 @@ func newStateShowCmd() *cobra.Command {
 		fmt.Printf("phase:         %s\n", s.Phase)
 		fmt.Printf("branch:        %s\n", s.Branch)
 		fmt.Printf("runtime_dir:   %s\n", layout.ChangeRuntimeDir(s.Change))
+		fmt.Printf("artifact_layout: %s\n", s.ArtifactLayout)
+		kind := "legacy"
+		if s.Tracker != nil {
+			kind = s.Tracker.Target.Kind
+		}
+		fmt.Printf("tracker:       %s\n", kind)
+		fmt.Printf("tasks_dir:     %s\n", s.TasksDir)
 		fmt.Printf("spec_path:     %s\n", s.SpecPath)
 		fmt.Printf("tasks_path:    %s\n", s.TasksPath)
 		fmt.Printf("design:        track=%s approved=%v path=%s\n", s.DesignTrack, s.DesignApproved, s.DesignPath)
@@ -82,7 +89,19 @@ func newStateTransitionCmd() *cobra.Command {
 			if _, ok := flow.Find(s.Phase, event); !ok {
 				return fmt.Errorf("event %q is not legal from phase %q", event, s.Phase)
 			}
+			// Remote synchronization is an invariant, not recovery readiness.
+			// Check it on the locked state before reporting or auditing any override.
+			verified, err := checkTrackerSync(cmd.Context(), store.Root(), *s, event)
+			if err != nil {
+				return fmt.Errorf("tracker sync for %s: %w", event, err)
+			}
+			if err := recheckTrackerInputs(store.Root(), *s, verified); err != nil {
+				return fmt.Errorf("tracker sync for %s: %w", event, err)
+			}
 			report := guard.Run(store.Root(), *s, event)
+			if err := recheckTrackerInputs(store.Root(), *s, verified); err != nil {
+				return fmt.Errorf("tracker sync for %s: %w", event, err)
+			}
 			printGuardReport(report)
 			if !report.Passed() && !force {
 				return fmt.Errorf("guard checks failed for event %q (use --force with --reason for recovery; not verification)", event)
@@ -187,6 +206,9 @@ func newStateSetFieldCmd() *cobra.Command {
 }
 
 func setField(s *flow.State, field, value string) error {
+	if s.ArtifactLayout == flow.RuntimeIssuesLayout && (field == "spec_path" || field == "tasks_path" || field == "report_path") {
+		return fmt.Errorf("%s is pinned for runtime-issues-v1 changes", field)
+	}
 	switch field {
 	case "spec_path":
 		s.SpecPath = value

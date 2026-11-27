@@ -20,7 +20,10 @@ import (
 
 const PolicyPath = ".mulix/quality.yaml"
 
-type Project struct{ Root, Change, SpecPath, TasksPath string }
+type Project struct {
+	Root, Change, SpecPath, TasksPath string
+	TasksDir, ReportPath              string
+}
 type Criterion struct {
 	ID          string `yaml:"id" json:"id"`
 	Requirement string `yaml:"requirement" json:"requirement"`
@@ -48,6 +51,15 @@ type Contract struct {
 	Tasks       []Task      `yaml:"tasks" json:"tasks"`
 	Cases       []Case      `yaml:"cases" json:"cases"`
 	VerifyCases []Case      `yaml:"verify_cases,omitempty" json:"verify_cases,omitempty"`
+
+	// Native contracts retain the exact version actually parsed. Receipts
+	// must not bind a newer on-disk version to an older case selection.
+	native *nativeContractVersion
+}
+type testMatrix struct {
+	Tasks       []Task `yaml:"tasks"`
+	Cases       []Case `yaml:"cases"`
+	VerifyCases []Case `yaml:"verify_cases"`
 }
 type Suite struct {
 	ID             string        `yaml:"id" json:"id"`
@@ -144,6 +156,10 @@ func ValidateSpec(p Project) ([]Criterion, error) {
 	if err != nil {
 		return nil, err
 	}
+	return validateSpec(data)
+}
+
+func validateSpec(data []byte) ([]Criterion, error) {
 	var spec struct {
 		Criteria []Criterion `yaml:"criteria"`
 	}
@@ -197,6 +213,10 @@ func TaskNumbers(md string) []int {
 	return out
 }
 func LoadContract(p Project) (Contract, error) {
+	if p.TasksDir != "" {
+		_, c, err := readNativeContract(p)
+		return c, err
+	}
 	var c Contract
 	criteria, err := ValidateSpec(p)
 	if err != nil {
@@ -207,18 +227,17 @@ func LoadContract(p Project) (Contract, error) {
 	if err != nil {
 		return c, err
 	}
-	var matrix struct {
-		Tasks       []Task `yaml:"tasks"`
-		Cases       []Case `yaml:"cases"`
-		VerifyCases []Case `yaml:"verify_cases"`
-	}
+	var matrix testMatrix
 	if err := Block(data, "mulix-tests", &matrix); err != nil {
 		return c, err
 	}
 	c.Tasks = matrix.Tasks
 	c.Cases = matrix.Cases
 	c.VerifyCases = matrix.VerifyCases
-	numbers := TaskNumbers(string(data))
+	return validateContract(p, c, TaskNumbers(string(data)))
+}
+
+func validateContract(p Project, c Contract, numbers []int) (Contract, error) {
 	if len(c.Tasks) == 0 || len(c.Tasks) != len(numbers) {
 		return c, fmt.Errorf("test matrix tasks must match all Task headings")
 	}
@@ -317,12 +336,29 @@ func SafeDir(root, rel string) (string, error) {
 	}
 	return p, nil
 }
+
+// executionPolicy keeps native execution and tool selection on the policy
+// parsed from the versioned bytes, not a second read from a mutable file.
+func executionPolicy(p Project, c Contract) (Policy, error) {
+	if p.TasksDir == "" {
+		return LoadPolicy(p.Root)
+	}
+	if c.native == nil {
+		return Policy{}, fmt.Errorf("native contract lacks its accepted policy")
+	}
+	return c.native.policy, nil
+}
+
 func LoadPolicy(root string) (Policy, error) {
-	var p Policy
 	data, err := ReadProjectFile(root, PolicyPath)
 	if err != nil {
-		return p, fmt.Errorf("quality policy: %w", err)
+		return Policy{}, fmt.Errorf("quality policy: %w", err)
 	}
+	return parsePolicy(root, data)
+}
+
+func parsePolicy(root string, data []byte) (Policy, error) {
+	var p Policy
 	if err := decodeStrict(data, &p); err != nil {
 		return p, err
 	}

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"path/filepath"
 	"runtime"
@@ -89,8 +90,20 @@ func Decide(root string, s flow.State, req Request) Decision {
 	}
 
 	rel := relativeSlash(root, req.ToolInput.FilePath)
-	if linkedRuntimeTest(root, req.ToolInput.FilePath, rel) {
-		return Decision{Reason: "Runtime tests must be ordinary change-owned source paths, not aliases.", Next: "Write the source into the owning change's tests directory."}
+	if linkedRuntimePath(root, req.ToolInput.FilePath, rel) {
+		return Decision{Reason: "Runtime artifacts must use ordinary change-owned paths, not aliases.", Next: "Write to the owning change's runtime path directly."}
+	}
+	if s.Archived {
+		return Decision{Reason: "Archived changes cannot be written.", Next: "Select an unarchived change."}
+	}
+	// Classify published snapshots before the phase whitelist. On a
+	// case-insensitive volume even the runtime prefix can be case-aliased.
+	if s.ArtifactLayout == flow.RuntimeIssuesLayout && s.Tracker != nil {
+		for _, issue := range s.Tracker.Issues {
+			if issue.Published() && matchesSnapshotPath(root, rel, issue.Path) {
+				return Decision{Reason: "A published Issue snapshot is read-only to Write/Edit.", Next: "Use mulix tracker preview and separately authorized tracker apply for this bound snapshot."}
+			}
+		}
 	}
 
 	if isUnder(rel, layout.RuntimeDir) {
@@ -120,6 +133,28 @@ func Decide(root string, s flow.State, req Request) Decision {
 	}
 }
 
+// matchesSnapshotPath also recognizes a case alias to the same physical
+// file, without treating a distinct draft on a case-sensitive FS as bound.
+func matchesSnapshotPath(root, rel, published string) bool {
+	if rel == published {
+		return true
+	}
+	if !strings.EqualFold(rel, published) {
+		return false
+	}
+	a, err := fileutil.ControlPath(root, rel, false)
+	if err != nil {
+		return false
+	}
+	b, err := fileutil.ControlPath(root, published, false)
+	if err != nil {
+		return false
+	}
+	aInfo, aErr := os.Lstat(a)
+	bInfo, bErr := os.Lstat(b)
+	return aErr == nil && bErr == nil && aInfo.Mode().IsRegular() && bInfo.Mode().IsRegular() && os.SameFile(aInfo, bInfo)
+}
+
 // decideRuntime permits only phase-owned retained artifacts. Legacy shared
 // output and another change's directory are not writable destinations.
 func decideRuntime(s flow.State, rel string) Decision {
@@ -136,6 +171,23 @@ func decideRuntime(s flow.State, rel string) Decision {
 			Allow:  false,
 			Reason: fmt.Sprintf("%s is mulix's own state file and must not be edited directly.", rel),
 			Next:   "Use `mulix state set` / `mulix state transition <event>` (which runs guards) instead of editing state files by hand.",
+		}
+	}
+	if s.ArtifactLayout == flow.RuntimeIssuesLayout {
+		switch s.Phase {
+		case flow.PhaseSpecify, flow.PhaseClarify:
+			if samePath(rel, path.Join(own, layout.RuntimeSpecFile)) {
+				return Decision{Allow: true}
+			}
+		case flow.PhaseTasks:
+			parent, name := path.Split(rel)
+			if samePath(strings.TrimSuffix(parent, "/"), path.Join(own, layout.RuntimeIssuesDir)) && name != "" && strings.HasSuffix(name, ".md") {
+				return Decision{Allow: true}
+			}
+		case flow.PhaseVerify:
+			if samePath(rel, path.Join(own, layout.RuntimeReportFile)) {
+				return Decision{Allow: true}
+			}
 		}
 	}
 	for _, sub := range runtimeWritable[s.Phase] {
@@ -176,6 +228,9 @@ func decideRuntime(s flow.State, rel string) Decision {
 // change directory. The design phase writes only under .mulix/.runtime/
 // (see runtimeWritable) — its output is the design doc, not docs/.
 func allowedPrefixes(s flow.State) (prefixes []string, unrestricted bool) {
+	if s.ArtifactLayout == flow.RuntimeIssuesLayout && s.Phase != flow.PhaseBuild {
+		return nil, false
+	}
 	switch s.Phase {
 	case flow.PhaseSpecify, flow.PhaseClarify:
 		return []string{specDirFor(s)}, false
@@ -221,9 +276,16 @@ func relativeSlash(root, p string) string {
 	return filepath.ToSlash(filepath.Clean(p))
 }
 
-// A link in the logical tests path must not turn a restricted write into
-// an unrestricted build write outside the runtime tree.
-func linkedRuntimeTest(root, requested, physical string) bool {
+// Runtime paths must not use aliases that bypass phase or ownership checks.
+func linkedRuntimePath(root, requested, physical string) bool {
+	raw := filepath.ToSlash(requested)
+	if isUnder(physical, layout.RuntimeDir) || strings.Contains(raw, "/"+layout.RuntimeDir+"/") || strings.HasPrefix(raw, layout.RuntimeDir+"/") {
+		for _, segment := range strings.Split(raw, "/") {
+			if segment == "." || segment == ".." {
+				return true
+			}
+		}
+	}
 	if !filepath.IsAbs(requested) {
 		requested = filepath.Join(root, requested)
 	}
@@ -232,19 +294,29 @@ func linkedRuntimeTest(root, requested, physical string) bool {
 		return false
 	}
 	rel = filepath.ToSlash(rel)
-	parts := strings.SplitN(rel, "/", 5)
-	if !isUnder(rel, layout.RuntimeDir) || len(parts) < 4 || !samePath(parts[3], layout.TestsDir) {
+	if !isUnder(rel, layout.RuntimeDir) && !isUnder(physical, layout.RuntimeDir) {
 		return false
 	}
-	// A dangling link resolves to its original spelling in canonicalPath.
-	// Inspect existing path components as well as the resolved destination.
+	if !samePath(rel, physical) {
+		return true
+	}
+	if !isUnder(rel, layout.RuntimeDir) {
+		return false
+	}
 	_, err = fileutil.ControlPath(root, rel, false)
-	return err != nil || !samePath(rel, physical)
+	return err != nil
 }
 
 // Write targets may not exist yet. Resolve the nearest existing ancestor so
 // Windows short names and long names do not identify different policy roots.
 func canonicalPath(p string) string {
+	return canonicalPathDepth(p, 0)
+}
+
+func canonicalPathDepth(p string, depth int) string {
+	if depth >= 40 {
+		return p
+	}
 	current := filepath.Clean(p)
 	var suffix []string
 	for {
@@ -253,6 +325,19 @@ func canonicalPath(p string) string {
 				resolved = filepath.Join(resolved, suffix[i])
 			}
 			return resolved
+		}
+		// EvalSymlinks fails for dangling links. Resolve the link itself and
+		// carry its missing suffix along so ownership is still classified.
+		if info, err := os.Lstat(current); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			if target, err := os.Readlink(current); err == nil {
+				if !filepath.IsAbs(target) {
+					target = filepath.Join(filepath.Dir(current), target)
+				}
+				for i := len(suffix) - 1; i >= 0; i-- {
+					target = filepath.Join(target, suffix[i])
+				}
+				return canonicalPathDepth(target, depth+1)
+			}
 		}
 		parent := filepath.Dir(current)
 		if parent == current {

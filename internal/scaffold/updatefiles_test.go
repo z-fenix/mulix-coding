@@ -5,6 +5,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -251,6 +253,204 @@ func TestUpdateObsolete_ForceBacksUpUnknownContent(t *testing.T) {
 	if got := readProjectFile(t, root, run.backups.dir+"/baseline/"+unitRel); got != "UNKNOWN BASE\n" {
 		t.Fatal("force lost old B")
 	}
+}
+
+func TestRetireTaskstoissuesPreservesCustomization(t *testing.T) {
+	rel := ".claude/skills/mulix-taskstoissues/SKILL.md"
+	baseRel := ".mulix/.installed/" + rel
+	official, err := os.ReadFile("../../examples/todo-cli/" + baseRel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const unknown = "---\nname: mulix-taskstoissues\n---\nUser's instructions, not vendor bytes.\n"
+	aux := ".claude/skills/mulix-taskstoissues/user-notes.md"
+	for _, tc := range []struct {
+		name, local, base string
+		recorded, pending bool
+		remove            bool
+	}{
+		{name: "audited pre-metadata local-only", local: string(official), remove: true},
+		{name: "audited pre-metadata baseline", local: string(official), base: string(official), remove: true},
+		{name: "managed vendor baseline", local: "older release", base: "older release", recorded: true, remove: true},
+		{name: "modified managed copy", local: string(official) + "user addition", base: string(official), recorded: true},
+		{name: "unproven path and baseline", local: unknown, base: unknown},
+		{name: "unproven local-only", local: unknown},
+		{name: "registered pending conflict", local: unknown, base: string(official), recorded: true, pending: true},
+		{name: "registered pending without baseline", local: unknown, pending: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeProjectFile(t, root, ".claude/skills/mulix-using/SKILL.md", "entry fixture")
+			writeProjectFile(t, root, aux, "must remain")
+			writeProjectFile(t, root, ".claude/skills/user-owned/SKILL.md", "unrelated skill")
+			local := writeProjectFile(t, root, rel, tc.local)
+			base := filepath.Join(root, filepath.FromSlash(baseRel))
+			if tc.base != "" {
+				writeProjectFile(t, root, baseRel, tc.base)
+			}
+			st := newInstallState()
+			if tc.recorded {
+				st.Files[rel] = vendorRecord{SHA256: contentDigest([]byte(tc.base))}
+			}
+			const sidecar = ".mulix/.update-conflicts/retired/candidate.md"
+			if tc.pending {
+				writeProjectFile(t, root, sidecar, "user resolution in progress")
+				st.Pending[rel] = pendingUpdate{Stage: "conflict", Candidate: sidecar, LocalSHA256: contentDigest([]byte(tc.local)), IncomingSHA256: contentDigest(official)}
+			}
+			if tc.pending || tc.recorded {
+				if err := saveInstallState(root, st); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Test both routes: an ordinary upgrade and force despite a block.
+			for _, force := range []bool{false, true} {
+				res, err := Update(UpdateOptions{Root: root, Force: force})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if tc.remove {
+					for _, path := range []string{local, base} {
+						if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
+							t.Errorf("verified obsolete exporter still installed: %s (%v)", path, err)
+						}
+					}
+					if !force {
+						if !slices.Contains(res.Removed, rel) || len(res.Backups) != 1 || trackerRetirementBackup(t, res.Backups[0], "local", rel) != tc.local {
+							t.Errorf("retirement did not report and preserve exact original: %+v", res)
+						}
+						if len(res.Backups) == 1 && tc.base != "" && trackerRetirementBackup(t, res.Backups[0], "baseline", rel) != tc.base {
+							t.Error("vendor baseline not preserved")
+						}
+					}
+				} else {
+					if got, err := os.ReadFile(local); err != nil || string(got) != tc.local {
+						t.Errorf("force=%v: customization was removed or overwritten: %v", force, err)
+					}
+					if !slices.ContainsFunc(res.Blocked, func(s string) bool { return strings.HasPrefix(s, rel+" ") }) {
+						t.Errorf("force=%v: did not report retirement block: %+v", force, res)
+					}
+					if tc.base != "" && readProjectFile(t, root, baseRel) != tc.base {
+						t.Error("blocked retirement changed baseline")
+					}
+				}
+				if tc.pending {
+					after, err := loadInstallState(root)
+					if err != nil || after.Pending[rel].Candidate != sidecar || readProjectFile(t, root, sidecar) != "user resolution in progress" {
+						t.Fatal("stale pending conflict did not survive retirement")
+					}
+				}
+				if readProjectFile(t, root, aux) != "must remain" || readProjectFile(t, root, ".claude/skills/user-owned/SKILL.md") != "unrelated skill" {
+					t.Fatal("retirement touched unrelated files")
+				}
+			}
+		})
+	}
+}
+
+func TestRetireTaskstoissuesRecognizesAuditedLF(t *testing.T) {
+	const rel = ".claude/skills/mulix-taskstoissues/SKILL.md"
+	for _, tc := range []struct{ name, fixture string }{
+		{"embedded vendor", "testdata/legacy/taskstoissues-lf.txt"},
+		{"example vendor", "../../examples/todo-cli/.mulix/.installed/" + rel},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, err := os.ReadFile(tc.fixture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Exercise the audited Git blob bytes even in a CRLF checkout.
+			lf := strings.ReplaceAll(string(b), "\r\n", "\n")
+			root := t.TempDir()
+			writeProjectFile(t, root, ".claude/skills/mulix-using/SKILL.md", "entry fixture")
+			local := writeProjectFile(t, root, rel, lf)
+			res, err := Update(UpdateOptions{Root: root})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Lstat(local); !errors.Is(err, fs.ErrNotExist) || !slices.Contains(res.Removed, rel) {
+				t.Fatalf("verified pre-metadata LF exporter was not retired: %v; blocked: %v", err, res.Blocked)
+			}
+			if len(res.Backups) != 1 || trackerRetirementBackup(t, res.Backups[0], "local", rel) != lf {
+				t.Fatal("LF exporter retirement lost the exact backup")
+			}
+		})
+	}
+}
+
+func TestRetireTaskstoissuesProtectsCaseAliases(t *testing.T) {
+	const canonical = ".claude/skills/mulix-taskstoissues/SKILL.md"
+	const alias = ".claude/skills/MULIX-TaskstoIssues/skill.md"
+	const base = ".mulix/.installed/"
+	for _, pending := range []bool{false, true} {
+		t.Run(map[bool]string{false: "modified alias", true: "pending alias shares pristine canonical path"}[pending], func(t *testing.T) {
+			root := t.TempDir()
+			writeProjectFile(t, root, ".claude/skills/mulix-using/SKILL.md", "entry fixture")
+			aux := ".claude/skills/MULIX-TaskstoIssues/notes.md"
+			writeProjectFile(t, root, aux, "unrelated")
+			const sidecar = ".mulix/.update-conflicts/retired/candidate.md"
+			st := newInstallState()
+			var want string
+			if pending {
+				want = readProjectFile(t, "../../examples/todo-cli", base+canonical)
+				for _, prefix := range []string{"", base} {
+					source := writeProjectFile(t, root, prefix+canonical, want)
+					target := filepath.Join(root, filepath.FromSlash(prefix+alias))
+					if _, err := os.Lstat(target); errors.Is(err, fs.ErrNotExist) {
+						// On case-sensitive hosts exercise two names for one file.
+						if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+							t.Fatal(err)
+						}
+						if err := os.Link(source, target); err != nil {
+							t.Fatal(err)
+						}
+					} else if err != nil {
+						t.Fatal(err)
+					}
+				}
+				st.Files[canonical] = vendorRecord{SHA256: contentDigest([]byte(want))}
+				writeProjectFile(t, root, sidecar, "keep pending resolution")
+				st.Pending[alias] = pendingUpdate{Stage: "conflict", LocalSHA256: contentDigest([]byte(want)), IncomingSHA256: contentDigest([]byte("incoming")), Candidate: sidecar}
+			} else {
+				want = "customized old exporter"
+				writeProjectFile(t, root, alias, want)
+				writeProjectFile(t, root, base+alias, "older pristine vendor")
+				st.Files[alias] = vendorRecord{SHA256: contentDigest([]byte("older pristine vendor"))}
+			}
+			if err := saveInstallState(root, st); err != nil {
+				t.Fatal(err)
+			}
+			res, err := Update(UpdateOptions{Root: root, Force: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(alias))); err != nil || string(got) != want {
+				t.Fatalf("force removed or replaced a protected exporter case alias: %v", err)
+			}
+			if !slices.ContainsFunc(res.Blocked, func(s string) bool {
+				p, _, _ := strings.Cut(s, " ")
+				return strings.EqualFold(p, canonical)
+			}) {
+				t.Fatalf("retirement did not report the alias: %v", res.Blocked)
+			}
+			if pending {
+				after, err := loadInstallState(root)
+				if err != nil || after.Pending[alias].Candidate != sidecar || readProjectFile(t, root, sidecar) != "keep pending resolution" || readProjectFile(t, root, canonical) != want {
+					t.Fatal("pending alias did not also protect the canonical probe")
+				}
+				if got := readProjectFile(t, root, base+canonical); got != want {
+					t.Fatal("force removed the pending alias's vendor baseline")
+				}
+			}
+			if readProjectFile(t, root, aux) != "unrelated" {
+				t.Fatal("retirement changed auxiliary file")
+			}
+		})
+	}
+}
+
+func trackerRetirementBackup(t *testing.T, backup, kind, rel string) string {
+	t.Helper()
+	return readProjectFile(t, backup, kind+"/"+rel)
 }
 
 func TestUpdateHosts_NoEvidenceIsAnError(t *testing.T) {

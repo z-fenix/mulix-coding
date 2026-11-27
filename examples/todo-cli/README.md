@@ -1,9 +1,12 @@
 # todo-cli
 
-A minimal example CLI built to exercise the mulix spec-driven workflow
-end to end. See `docs/specs/001-add-task-priority-levels/spec.md` for
-the requirements doc, and `docs/changes/001-add-task-priority-levels/`
-for the plan/tasks/analyze/report artifact trail.
+A minimal CLI with a **historical** Mulix delivery record. See
+`docs/specs/001-add-task-priority-levels/spec.md` and
+`docs/changes/001-add-task-priority-levels/` for the retained artifact trail.
+The checked-in legacy skills and installed baselines are frozen fixtures, not
+current setup or publication instructions. For new changes, follow the
+[root workflow](../../README.md#the-workflow) and, only for GitHub/GitLab, the
+[bound Issue workflow](../../README.md#publish-and-synchronize-bound-issues).
 
 ## Commands
 

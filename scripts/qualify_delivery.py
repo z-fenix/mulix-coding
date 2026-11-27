@@ -56,7 +56,7 @@ def qualify(bundle, baseline, output, target):
         require(d.sha(cli.read_bytes()) == native_row["binary_sha256"], "installed binary differs from final artifact")
         version = runner.run("candidate-version", [cli, "version"])
         require(version.stdout.strip() == "mulix " + current["version"], "final installed version mismatch")
-        runner.run("init-current-project", [cli, "init", "--dir", fresh, "--host", "dsh"])
+        runner.run("init-current-project", [cli, "_setup", "--dir", fresh, "--host", "dsh", "--tracker", "markdown"])
         incoming = (fresh / relative).read_bytes()
         require(incoming != old_template, "upgrade fixture has no actual old/current upstream difference")
         conflict = runner.run("upgrade-conflict", [cli, "update"], cwd=project, expected="nonzero")

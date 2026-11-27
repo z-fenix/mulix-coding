@@ -5,80 +5,58 @@ description: Use when the active change is in the tasks phase, after its design 
 
 # Tasks phase
 
-**REQUIRED SUB-SKILL:** invoke `writing-plans` now and follow it
-exactly. Its output is this change's `tasks.md`. This skill only adds
-what mulix needs around it.
+**REQUIRED SUB-SKILL:** use `writing-plans` for decomposition, executable
+steps, and self-review. Use the destinations and phase exit below instead
+of its default save path and handoff.
 
 ## Inputs
 
-- `docs/specs/<change>/spec.md` — the requirements authority.
-- The approved design: `design_path` from `mulix state show`
-  (architectural), or the in-chat design approved in the design phase
-  (bounded).
-- `.mulix/memory/constitution.md`, if it has real content — every task
-  must comply with its MUST principles; an unjustified violation is a
-  plan defect, fixed here, not in build.
+Run `mulix state show`. Read `spec_path`, the approved design (`design_path`
+for architectural, the approved in-chat approach for bounded), and the
+project constitution. Keep the plan within the approved design and scope.
 
-## Output: `docs/changes/<change>/tasks.md`
+## Write the approved inputs
 
-Write it exactly as writing-plans specifies — plan header, Global
-Constraints, Review Focus, then one section per task — with these
-mulix specifics:
+- **Native (`runtime-issues-v1`):** Use `.mulix/templates/issue-task-template.md`
+  to write one direct `NN-short-name.md` in the pinned `tasks_dir` per task.
+  Number tasks `1..n` without gaps; match the filename, the single `## Task N:`
+  heading, and the one task in its `mulix-tests` fence. Include the exact
+  `spec_path`, requirement/AC IDs, design constraints, dependencies, interfaces
+  and review cases that task owns. Use this per-task format instead of the
+  combined plan header and checkbox tracking; native progress goes in the
+  Build ledger, not these files.
+- **Legacy:** Use `.mulix/templates/tasks-template.md` (or the project's
+  `mulix preset resolve tasks-template` override), with the combined plan
+  header, Spec/Design references, Global Constraints, Review Focus and
+  ordered `## Task N:` sections. Use `tasks_path` or, if unset,
+  `docs/changes/<change>/tasks.md`. Keep step checkboxes initially unchecked.
 
-- **Header:** `**Spec:**` names `docs/specs/<change>/spec.md`, and
-  `**Design:**` the design doc (or "approved in chat" for bounded, with the
-  design's approach summarized under Architecture). Keep the "For agentic
-  workers" line; the build phase decides which executor runs it.
-- **Task headings:** `## Task N: <name>`, N = 1, 2, 3... in execution
-  order, no gaps, each exactly once. The build executors extract briefs by
-  this heading, and the guards match ledger lines and reports to it.
-- **Acceptance contract:** include the template's per-task requirement IDs,
-  AC/TC mappings, observable Given/When/Then, evidence limits, dependencies
-  and unresolved gates. Preserve IDs from a separate acceptance source only
-  when the project defines one. For a foundational task, name who owns
-  integration evidence; a local GREEN does not prove integrated behavior.
-  Carry the spec's acceptance scope and blockers into the global gates.
-- **Steps:** code tasks use RED → verify RED → GREEN → verify GREEN with
-  `mulix test run --task N --stage red|green`, and commit only if authorized.
-  Verification/documentation tasks declare a concrete reason and run a real
-  `mulix test run --task N --stage check` instead of invented RED/GREEN.
-  Include complete test/code blocks and `Expected:` lines. Start every step
-  as `- [ ] **Step N: ...**`; mark `[X]` only after actual verified execution.
-- **Acceptance mapping:** use the `mulix-tests` fence in the tasks template.
-  Map every AC and task to concrete TC cases with point, Given/When/Then,
-  suite, exact emitted test name and project-relative test source file.
-  Derive assertions from the spec; review normal, boundary, error, permission
-  and integration cases. Declare each task's kind and non-code reason. When
-  Karate is configured, give each task its own `tests/features/task-N/` entries;
-  record any required final-only Karate cases in the same matrix's
-  `verify_cases`. Read the quality template for the exact path/name contract.
-- **Mandatory suites:** read `.mulix/templates/quality-template.md`, inspect
-  the project's actual test commands and configure `.mulix/quality.yaml`.
-  All declared suites run at final verification, including nested modules and
-  required integration checks; configuration remains project-owned.
-- `.mulix/templates/tasks-template.md` shows the resulting layout. If a
-  preset overrides it (`mulix preset resolve tasks-template`), follow the
-  override's structure — but the `## Task N` headings are not optional.
+For either layout:
 
-A small bounded change is still a plan: one or two tasks is fine; the
-headings and steps are not.
+- The matrix covers every AC and every task with concrete Given/When/Then,
+  an actual suite, emitted test identity and project-relative test file.
+  Native task files declare only their own cases, with unique TC IDs across
+  the plan. Put final-only Karate coverage in its owning file's `verify_cases`
+  (`task: 0`). Check `.mulix/quality.yaml` against the installed
+  `quality-template.md`; have the project owner resolve missing suite policy.
+- Code tasks plan `mulix test run --task N --stage red`, an implementation
+  change, then `--stage green`, with expected observations. Non-code tasks
+  declare a reason and an actual `--stage check`. Name remaining gates and
+  who owns integration evidence; a task GREEN alone is not that evidence.
+- Self-review the complete plan for scope, mapping coverage and executable
+  steps. Present it for the existing human plan review and revise the drafts
+  on feedback. Execution method and implementation belong to Build.
 
-## Review before the gate
+## Advance
 
-1. Run writing-plans' Self-Review and fix what it finds inline.
-2. Link tasks.md for the human and ask whether it captures what they
-   want. Wait for their answer; revise on feedback.
+For `github` or `gitlab`, run `mulix tracker publish tasks --dry-run` in
+this phase. Show the exact batch and target. Only after explicit publication
+approval, run `mulix tracker publish tasks --expect TOKEN`. A pending intent
+needs a fresh reviewed dry run for reconciliation, not another create or an
+alternate exporter. Bound task snapshots are read-only: use the confirmed
+sync workflow for authorized Issue edits. Markdown and legacy skip publication.
 
-There is no execution handoff here: don't ask how to execute and don't
-invoke an executor. The build phase asks.
-
-## Advancing out of this phase
-
-```
-mulix state set tasks_path docs/changes/<change>/tasks.md
-mulix state transition tasks-complete
-```
-
-The guard checks tasks.md exists inside `docs/changes/<change>/`, is
-non-empty, has `## Task N` sections numbered 1..n, and a complete acceptance
-matrix referring to configured suites. Missing mappings and policy fail closed.
+For legacy only, record the plan path with `mulix state set tasks_path <path>`.
+Then run `mulix guard tasks-complete` and `mulix state transition tasks-complete`.
+The remote gate requires a verified current spec and one exact current binding
+per task. Stop on drift or missing mappings; do not force the gate.

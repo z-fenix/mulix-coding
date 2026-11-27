@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -142,6 +143,40 @@ func hashFiles(p Project, paths []string, allowMissing bool, karate io.Writer) (
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
+
+// ArtifactInput identifies an exact file used by a native run, not a path
+// resolved again when rendering a report. It is omitted from legacy receipts.
+type ArtifactInput struct {
+	Path   string `yaml:"path" json:"path"`
+	SHA256 string `yaml:"sha256" json:"sha256"`
+}
+
+type nativeContractVersion struct {
+	digest string
+	inputs []ArtifactInput
+	policy Policy
+}
+
+func versionNativeContract(p Project, spec []byte, docs []TaskDocument, policyData []byte, policy Policy) *nativeContractVersion {
+	h := sha256.New()
+	io.WriteString(h, "mulix.runtime-issues-contract.v1\x00")
+	v := &nativeContractVersion{policy: policy}
+	frame := func(rel string, data []byte) {
+		// Length-frame both fields: moving a file or changing any Markdown
+		// byte changes the contract, independently of the source fingerprint.
+		fmt.Fprintf(h, "%d:%s%d:", len(rel), rel, len(data))
+		h.Write(data)
+		v.inputs = append(v.inputs, ArtifactInput{Path: rel, SHA256: Digest(data)})
+	}
+	frame(p.SpecPath, spec)
+	for _, d := range docs {
+		frame(d.Path, d.Markdown)
+	}
+	frame(PolicyPath, policyData)
+	v.digest = hex.EncodeToString(h.Sum(nil))
+	return v
+}
+
 func Fingerprint(p Project, c Contract, task int) (Snapshot, error) {
 	var s Snapshot
 	root, err := filepath.Abs(p.Root)
@@ -154,19 +189,30 @@ func Fingerprint(p Project, c Contract, task int) (Snapshot, error) {
 	}
 	s.Project = Digest([]byte(root))
 	s.Change = p.Change
-	spec, err := ReadProjectFile(root, p.SpecPath)
-	if err != nil {
-		return s, err
+	if p.TasksDir != "" {
+		_, live, err := readNativeContract(p)
+		if err != nil {
+			return s, err
+		}
+		if !reflect.DeepEqual(c, live) {
+			return s, fmt.Errorf("native acceptance contract changed after it was read; retry with the current inputs")
+		}
+		s.Contract = live.native.digest
+	} else {
+		spec, err := ReadProjectFile(root, p.SpecPath)
+		if err != nil {
+			return s, err
+		}
+		plan, err := ReadProjectFile(root, p.TasksPath)
+		if err != nil {
+			return s, err
+		}
+		policy, err := ReadProjectFile(root, PolicyPath)
+		if err != nil {
+			return s, err
+		}
+		s.Contract = Digest([]byte(p.SpecPath + "\x00" + string(spec) + "\x00" + p.TasksPath + "\x00" + string(normalizedPlan(plan)) + "\x00" + string(policy)))
 	}
-	plan, err := ReadProjectFile(root, p.TasksPath)
-	if err != nil {
-		return s, err
-	}
-	policy, err := ReadProjectFile(root, PolicyPath)
-	if err != nil {
-		return s, err
-	}
-	s.Contract = Digest([]byte(p.SpecPath + "\x00" + string(spec) + "\x00" + p.TasksPath + "\x00" + string(normalizedPlan(plan)) + "\x00" + string(policy)))
 	paths, rev, err := sourcePaths(p)
 	if err != nil {
 		return s, err
@@ -183,7 +229,11 @@ func Fingerprint(p Project, c Contract, task int) (Snapshot, error) {
 		}
 		tests = append(tests, tc.File)
 	}
-	policyConfig, err := LoadPolicy(root)
+	// Legacy policy lookup keeps using the physical root. Native selection
+	// must use the parsed policy bound to the contract we just checked.
+	project := p
+	project.Root = root
+	policyConfig, err := executionPolicy(project, c)
 	if err != nil {
 		return s, err
 	}

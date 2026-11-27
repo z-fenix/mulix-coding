@@ -1,6 +1,7 @@
 package cliutil
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/z-fenix/mulix-coding/internal/hook"
 	"github.com/z-fenix/mulix-coding/internal/sessionctx"
+	"github.com/z-fenix/mulix-coding/internal/state"
 )
 
 // The default entry remains mulix hook, as installed by previous releases.
@@ -22,7 +24,7 @@ func newHookCmd() *cobra.Command {
 		if outcome.Cause != nil {
 			fmt.Fprintf(os.Stderr, "mulix hook: %v (allow=%v)\n", outcome.Cause, outcome.Decision.Allow)
 		}
-		strict := outcome.Resolved.Mode == sessionctx.Session || (outcome.Resolved.Root != "" && outcome.Resolved.Mode == "")
+		strict := outcome.Resolved.Mode == sessionctx.Session || (outcome.Resolved.Root != "" && outcome.Resolved.Mode == "") || errors.Is(outcome.Cause, state.ErrInvalidArtifacts)
 		os.Exit(emitHook(os.Stdout, outcome.Decision, strict, hook.Render))
 		return nil
 	}}

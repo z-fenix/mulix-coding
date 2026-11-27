@@ -163,7 +163,7 @@ func ExecutionFingerprint(p Project, c Contract, task int) (Snapshot, error) {
 	if err != nil {
 		return snap, err
 	}
-	policy, err := LoadPolicy(p.Root)
+	policy, err := executionPolicy(p, c)
 	if err != nil {
 		return snap, err
 	}

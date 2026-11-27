@@ -1,14 +1,120 @@
 package hook
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/z-fenix/mulix-coding/internal/flow"
 )
 
 func req(tool, path string) Request {
 	return Request{HookEventName: "PreToolUse", ToolName: tool, ToolInput: ToolInput{FilePath: path}}
+}
+
+func TestRuntimeIssueArtifactWritesPerPhase(t *testing.T) {
+	root := t.TempDir()
+	var s flow.State
+	// Decode a future on-disk fixture without depending on new Go symbols.
+	if err := yaml.Unmarshal([]byte("change: example\nartifact_layout: runtime-issues-v1\nspec_path: .mulix/.runtime/example/spec.md\ntasks_dir: .mulix/.runtime/example/issues\nreport_path: .mulix/.runtime/example/report.md\n"), &s); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		phase flow.Phase
+		path  string
+		allow bool
+	}{
+		{flow.PhaseSpecify, ".mulix/.runtime/example/spec.md", true},
+		{flow.PhaseClarify, ".mulix/.runtime/example/spec.md", true},
+		{flow.PhaseTasks, ".mulix/.runtime/example/issues/1.md", true},
+		{flow.PhaseTasks, ".mulix/.runtime/example/issues/nested/1.md", false},
+		{flow.PhaseTasks, ".mulix/.runtime/example/issues/1.txt", false},
+		{flow.PhaseVerify, ".mulix/.runtime/example/report.md", true},
+		{flow.PhaseVerify, ".mulix/.runtime/example/spec.md", false},
+		{flow.PhaseSpecify, ".mulix/.runtime/other/spec.md", false},
+		{flow.PhaseSpecify, ".mulix/.runtime/example/state.yaml", false},
+		{flow.PhaseTasks, "docs/changes/example/tasks.md", false},
+		{flow.PhaseArchive, ".mulix/.runtime/example/report.md", false},
+	}
+	for _, tool := range []string{"Write", "Edit"} {
+		for _, tc := range cases {
+			s.Phase = tc.phase
+			if d := Decide(root, s, req(tool, tc.path)); d.Allow != tc.allow {
+				t.Errorf("%s %s %s: got %+v want allow=%t", tool, tc.phase, tc.path, d, tc.allow)
+			}
+		}
+	}
+	legacy := flow.New("legacy", "")
+	legacy.Phase = flow.PhaseTasks
+	if d := Decide(root, legacy, req("Write", "docs/changes/legacy/tasks.md")); !d.Allow {
+		t.Errorf("legacy tasks blocked: %+v", d)
+	}
+}
+
+func TestRuntimeIssueArtifactsRejectSymlinkAliases(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink privileges vary on Windows")
+	}
+	root := t.TempDir()
+	own := filepath.Join(root, ".mulix", ".runtime", "example")
+	if err := os.MkdirAll(filepath.Join(own, "issues"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(own, "issues"), filepath.Join(root, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), filepath.Join(own, "issues", "outside")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "missing"), filepath.Join(own, "spec.md")); err != nil {
+		t.Fatal(err)
+	}
+	s := flow.New("example", "")
+	s.ArtifactLayout = flow.RuntimeIssuesLayout
+	for _, tc := range []struct {
+		phase flow.Phase
+		p     string
+	}{
+		{flow.PhaseTasks, "alias/task.md"}, {flow.PhaseTasks, ".mulix/.runtime/example/issues/outside/task.md"},
+		{flow.PhaseSpecify, ".mulix/.runtime/example/spec.md"}, {flow.PhaseBuild, ".mulix/.runtime/example/issues/outside/task.md"},
+		{flow.PhaseVerify, ".mulix/.runtime/example/issues/../report.md"},
+	} {
+		s.Phase = tc.phase
+		if d := Decide(root, s, req("Write", tc.p)); d.Allow {
+			t.Errorf("%s allowed alias %s", tc.phase, tc.p)
+		}
+	}
+}
+
+func TestBuildRejectsDanglingAliasesIntoOtherRuntime(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink privileges vary on Windows")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".mulix", ".runtime", "other"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, target string }{
+		{"relative-alias", ".mulix/.runtime/other/missing.md"},
+		{"absolute-alias", filepath.Join(root, ".mulix", ".runtime", "other", "not-created.md")},
+	} {
+		if err := os.Symlink(tc.target, filepath.Join(root, tc.name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := flow.New("example", "")
+	s.Phase = flow.PhaseBuild
+	for _, name := range []string{"relative-alias", "absolute-alias"} {
+		if d := Decide(root, s, req("Write", name)); d.Allow {
+			t.Errorf("dangling alias %s to another change allowed", name)
+		}
+	}
+	if d := Decide(root, s, req("Write", "src/new.go")); !d.Allow {
+		t.Errorf("ordinary build path blocked: %+v", d)
+	}
 }
 
 func TestDecide_NonGatedToolAlwaysAllowed(t *testing.T) {

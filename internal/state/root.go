@@ -13,7 +13,7 @@ import (
 
 // ErrNoRoot is returned by FindRoot when no .mulix directory is found
 // walking up from the starting directory.
-var ErrNoRoot = errors.New("state: no .mulix directory found (run `mulix init` first)")
+var ErrNoRoot = errors.New("state: no .mulix directory found (run the `setup-mulix` skill first)")
 
 // activeFile records which change is "current" for commands that don't
 // take an explicit --change flag.

@@ -33,7 +33,7 @@ expect_update_fail() {
 
 printf '\n== DSH-only: three updates keep local edits and pure baseline\n'
 project="$work/dsh"
-mulix init --dir "$project" --host dsh >/dev/null
+mulix _setup --tracker markdown --dir "$project" --host dsh >/dev/null
 rel=.mulix/templates/spec-template.md
 cp "$project/$rel" "$work/vendor.md"
 printf '\nSMOKE_LOCAL_CUSTOMIZATION\n' >> "$project/$rel"
@@ -49,12 +49,39 @@ test -f "$project/.dsh/skills/mulix-using/SKILL.md"
 (cd "$project" && mulix preset resolve spec-template) > "$work/resolved.md"
 ! grep -q SMOKE_LOCAL_CUSTOMIZATION "$work/resolved.md"
 
+printf '\n== Retire only the exact unmodified Issue exporter, even with force\n'
+retired="$work/retired"
+mulix _setup --tracker markdown --dir "$retired" --host claude --host dsh >/dev/null
+old=.claude/skills/mulix-taskstoissues/SKILL.md
+custom=.dsh/skills/mulix-taskstoissues/SKILL.md
+snapshot="$repo/examples/todo-cli/.mulix/.installed/$old"
+test ! -e "$retired/$old"
+test ! -e "$retired/$custom"
+mkdir -p "$(dirname "$retired/$old")" "$(dirname "$retired/$custom")"
+cp "$snapshot" "$retired/$old"   # unregistered old official copy
+cp "$snapshot" "$retired/$custom"
+printf '\nUSER CUSTOMIZATION\n' >> "$retired/$custom"
+cp "$retired/$custom" "$work/custom-exporter.md"
+printf 'KEEP AUXILIARY\n' > "$(dirname "$retired/$old")/user-notes.md"
+expect_update_fail "$retired" --force # modified DSH copy must remain blocked
+test ! -e "$retired/$old"
+cmp "$work/custom-exporter.md" "$retired/$custom"
+grep -q 'KEEP AUXILIARY' "$(dirname "$retired/$old")/user-notes.md"
+grep -Fq "removed: $old" "$work/failure.log"
+grep -Fq "blocked: $custom" "$work/failure.log"
+backed=("$retired"/.mulix/.backups/update-*/local/"$old")
+[ "${#backed[@]}" -eq 1 ]
+cmp "$snapshot" "${backed[0]}"
+expect_update_fail "$retired" --force
+test ! -e "$retired/$old"
+cmp "$work/custom-exporter.md" "$retired/$custom"
+
 printf '\n== Known entry aliases migrate and retry without deleting auxiliary files\n'
 for alias in using-mulix mulix-using-mulix; do
   host=dsh
   [ "$alias" = mulix-using-mulix ] && host=claude
   legacy="$work/$alias"
-  mulix init --dir "$legacy" --host "$host" >/dev/null
+  mulix _setup --tracker markdown --dir "$legacy" --host "$host" >/dev/null
   old=".$host/skills/$alias/SKILL.md"
   mkdir -p "$(dirname "$legacy/$old")"
   "$python_bin" -I - "$repo/internal/scaffold/testdata/legacy/$alias.md" "$legacy/$old" ".$host/skills" <<'PY'
@@ -75,7 +102,7 @@ done
 
 printf '\n== Unknown old source stays blocked across retries\n'
 unknown="$work/unknown"
-mulix init --dir "$unknown" --host dsh >/dev/null
+mulix _setup --tracker markdown --dir "$unknown" --host dsh >/dev/null
 old=.dsh/skills/using-mulix/SKILL.md
 mkdir -p "$(dirname "$unknown/$old")"
 printf 'UNKNOWN USER ENTRY\n' > "$unknown/$old"
@@ -89,7 +116,7 @@ done
 
 printf '\n== Conflict is sidecar-only; explicit acceptance keeps resolution\n'
 conflict="$work/conflict"
-mulix init --dir "$conflict" --host dsh >/dev/null
+mulix _setup --tracker markdown --dir "$conflict" --host dsh >/dev/null
 # Model a previously recorded vendor version using fixture metadata; current
 # N remains the real embedded template. Never modify/rebuild repository assets.
 "$python_bin" -I - "$conflict" "$rel" <<'PY'

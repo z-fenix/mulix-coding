@@ -4,7 +4,7 @@
 # call. Using the recorded per-task BASE (not HEAD~1) keeps multi-commit
 # tasks intact.
 #
-# Usage: review-package [-C DIR] PLAN_FILE BASE HEAD [OUTFILE]
+# Usage: review-package [-C DIR] PLAN_PATH BASE HEAD [OUTFILE (legacy only)]
 # Default OUTFILE: <repo-root>/.mulix/.runtime/<change>/sdd/<plan-basename>/review-<base7>..<head7>.diff
 # (named per range, so a re-review after fixes gets a distinct fresh file).
 # The repository is the one sdd-repo names; -C DIR runs as if started in DIR,
@@ -19,14 +19,23 @@ if [ "${1:-}" = "-C" ]; then
 fi
 
 if [ $# -lt 3 ] || [ $# -gt 4 ]; then
-  echo "usage: review-package [-C DIR] PLAN_FILE BASE HEAD [OUTFILE]" >&2
+  echo "usage: review-package [-C DIR] PLAN_PATH BASE HEAD [OUTFILE (legacy only)]" >&2
   exit 2
 fi
 
 plan=$1
 base=$2
 head=$3
-[ -f "$plan" ] || { echo "no such plan file: $plan" >&2; exit 2; }
+native_plan=false
+if [ -d "$plan" ]; then
+  native_plan=true
+  if [ $# -eq 4 ]; then
+    printf 'review-package: native review packages are written only in their SDD workspace\n' >&2
+    exit 2
+  fi
+else
+  [ -f "$plan" ] || { echo "no such plan file: $plan" >&2; exit 2; }
+fi
 
 # Invoke via bash rather than direct exec: some extractors (Python zipfile)
 # strip Unix exec bits when unpacking marketplace packages (#2040).
@@ -47,6 +56,19 @@ else
   out="$dir/review-$(git -C "$repo" rev-parse --short "$base")..$(git -C "$repo" rev-parse --short "$head").diff"
 fi
 
+target=$out
+if [ "$native_plan" = true ]; then
+  check_output() {
+    if [ -L "$out" ] || { [ -e "$out" ] && [ ! -f "$out" ]; }; then
+      printf 'review-package: refusing unsafe review output %s\n' "$out" >&2
+      exit 2
+    fi
+  }
+  check_output
+  target=$(mktemp "$dir/.review-package.XXXXXX")
+  trap 'rm -f -- "$target"' EXIT
+fi
+
 {
   echo "# Review package: ${base}..${head}"
   echo
@@ -58,7 +80,11 @@ fi
   echo
   echo "## Diff"
   git -C "$repo" diff -U10 "${base}..${head}"
-} > "$out"
+} > "$target"
+if [ "$native_plan" = true ]; then
+  check_output
+  mv -f -- "$target" "$out"
+fi
 
 commits=$(git -C "$repo" rev-list --count "${base}..${head}")
 echo "wrote ${out}: ${commits} commit(s), $(wc -c < "$out" | tr -d ' ') bytes"

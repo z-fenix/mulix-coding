@@ -7,18 +7,19 @@ description: Use when the active change is in the verify phase, or archive evide
 
 **REQUIRED SUB-SKILL:** `verification-before-completion` governs claims.
 
-Read the actual project constitution and the spec's Acceptance Baseline &
-Scope. Fix the implementation, requirements, test and environment baselines.
-Use the native AC/TC matrix and quality policy. When the constitution names
-an additional gate, run the procedure it specifies before the whole-change
-review and `mulix verify`, recording actual results and input identities in
-the report. Put unresolved required gates in `mulix-review.blocking`; missing,
-partial or skipped evidence is not approval.
+Run `mulix state show`. Read `spec_path`, the approved task inputs, and the
+project constitution. For `runtime-issues-v1` use the pinned `report_path`
+and the owning `sdd/issues/` ledger. For legacy use the plan-file workspace
+and `docs/changes/<change>/report.md` (the runner records its path). Fix the
+implementation, requirements, tests and environment being verified. When
+the constitution names an additional gate, run its specified procedure and
+record input identities and actual results in the report; unresolved required
+gates belong in `mulix-review.blocking`.
 
-1. Review each AC/TC against the spec and approved design, including boundaries,
-   errors and integration behavior. Read the build's rulings and deferred minors
-   in `.mulix/.runtime/<change>/sdd/tasks/progress.md`; record whether each ruling
-   holds against the spec in `docs/changes/<change>/report.md`.
+1. Review each AC/TC against the spec's Acceptance Baseline & Scope and the
+   approved design, including boundaries, errors and integration behavior.
+   Read the Build ledger's rulings and deferred findings; record whether each
+   ruling holds against the spec in the final report.
 2. Obtain a whole-change review and address blocking findings. Retain the actual
    review reference and outcome in the report using exactly one fence:
 
@@ -44,12 +45,14 @@ partial or skipped evidence is not approval.
    task checks already passed. Missing, all-skipped or malformed results fail
    closed. Review unmapped skips and undeclared/manual checks explicitly; a
    skip does not establish acceptance.
-4. On success, `mulix state transition verify-pass`. This enters archive with
-   `archive_confirmation=pending`; integration still needs an explicit human
-   decision. On failure, explain which tasks own it, then
-   `mulix state transition verify-fail` to return to build. Fix with real task
-   execution evidence; append rather than erase ledger history. Report repeated
-   failures instead of silently looping.
+4. On success, run `mulix guard verify-pass` and `mulix state transition
+   verify-pass` with the current receipt and unchanged report. GitHub/GitLab
+   also require current bound spec and task bodies. A sync failure is not
+   a test result; resolve drift using confirmed sync, then reassess evidence.
+   Successful transition enters archive with `archive_confirmation=pending`.
+   If verification fails, explain the failing behavior and its task, then
+   `mulix state transition verify-fail` for local recovery in Build. Keep
+   ledger history; report repeated failures instead of silently looping.
 
 Manual `verify_result=pass`, old logs and handwritten RED/GREEN are not test
 receipts. A failed/incomplete retry invalidates prior success. Source, tests,

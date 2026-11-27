@@ -101,6 +101,36 @@ func TestWriteFile_AppliesRequestedPermissions(t *testing.T) {
 	}
 }
 
+func TestWriteFileDurableReplacementAndBoundaries(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "nested", "checkpoint")
+	for _, content := range []string{"original content", "new"} {
+		if err := WriteFileDurable(root, target, []byte(content), 0o644); err != nil {
+			t.Fatalf("durable write: %v", err)
+		}
+		assertContent(t, target, content)
+		assertNoTemporaryFiles(t, filepath.Dir(target))
+	}
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(outside, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range []string{root, outside, filepath.Dir(target)} {
+		if err := WriteFileDurable(root, invalid, []byte("bad"), 0o644); err == nil {
+			t.Errorf("accepted invalid destination %s", invalid)
+		}
+	}
+	assertContent(t, target, "new")
+	assertContent(t, outside, "keep")
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(outside, link); err == nil {
+		if err := WriteFileDurable(root, link, []byte("bad"), 0o644); err == nil {
+			t.Fatal("accepted symlink target")
+		}
+		assertContent(t, outside, "keep")
+	}
+}
+
 func assertContent(t *testing.T, path, want string) {
 	t.Helper()
 	data, err := os.ReadFile(path)

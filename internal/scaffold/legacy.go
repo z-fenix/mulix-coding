@@ -1,8 +1,12 @@
 package scaffold
 
-import "path"
+import (
+	"path"
+	"strings"
+)
 
 const entrySkillName = "mulix-using"
+const retiredExporterSkill = "mulix-taskstoissues"
 
 var entryAliases = []string{"using-mulix", "mulix-using-mulix"}
 
@@ -20,7 +24,31 @@ var legacyVendorDigests = map[string]string{
 	".claude/skills/mulix-using-mulix/SKILL.md": "440e312e20ab151b578284bf7953ce58de1a1c1cd41a1f71f8f81f0a47781590",
 }
 
+// retiredExporterPath classifies case variants for protection on every host.
+// The name alone proves neither ownership nor permission to remove bytes.
+func retiredExporterPath(rel string) string {
+	for _, host := range allHosts {
+		canonical := entryRel(host, retiredExporterSkill)
+		if strings.EqualFold(rel, canonical) {
+			return canonical
+		}
+	}
+	return ""
+}
+
 func legacyVendorMatch(rel string, data []byte) bool {
+	if retiredExporterPath(rel) != "" {
+		// Audited exact LF Git blobs and CRLF copies of the last embedded
+		// exporter and frozen todo-cli example. No normalization on removal.
+		switch contentDigest(data) {
+		case "a72b6a4347c420d23018018ba361ccaa7c4d5095fe0f91c100dcc659eadfbfcb",
+			"ce22ce6beeecd3fcfcd5c45247362050eb3b9fc936cc6fc951405e90f8ae4e70",
+			"50c120f060fc8df24aa9ffc7d149daa0eedffc27e325fb466475059414c0723f",
+			"a2dfcb223f47e5dff34a9675b0c0b63617fb820f8d5bfd93cc011395a519961a":
+			return true
+		}
+		return false
+	}
 	expected, ok := legacyVendorDigests[managedMapKey(legacyVendorDigests, rel)]
 	return ok && contentDigest(data) == expected
 }

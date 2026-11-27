@@ -131,6 +131,16 @@ func Update(opts UpdateOptions) (result UpdateResult, err error) {
 	}
 	sort.Strings(pendingPaths)
 	for _, rel := range pendingPaths {
+		missingPending[rel] = true
+		if canonical := retiredExporterPath(rel); canonical != "" {
+			// Protect both spellings before probing the canonical path. On a
+			// case-insensitive filesystem the same file may own the conflict.
+			missingPending[canonical] = true
+			if err := run.removeObsolete(rel); err != nil {
+				return result, err
+			}
+			continue
+		}
 		_, hasBase, err := readInstalledFile(opts.Root, ".mulix/.installed/"+rel)
 		if err != nil {
 			return result, err
@@ -142,7 +152,16 @@ func Update(opts UpdateOptions) (result UpdateResult, err error) {
 		} else {
 			run.result.Blocked = append(run.result.Blocked, rel+" (pending no longer shipped, baseline missing; retained)")
 		}
-		missingPending[managedMapKey(missingPending, rel)] = true
+	}
+	// Probe only the known retired entry points, including installations
+	// that predate managed metadata and have no baseline to sweep.
+	for _, host := range hosts {
+		rel := entryRel(host, retiredExporterSkill)
+		if !missingPending[managedMapKey(missingPending, rel)] {
+			if err := run.removeObsolete(rel); err != nil {
+				return result, err
+			}
+		}
 	}
 	handledEntries := map[string]bool{}
 	readyEntries := map[Host]bool{}
@@ -179,6 +198,10 @@ func Update(opts UpdateOptions) (result UpdateResult, err error) {
 		return result, err
 	}
 	for _, rel := range obsolete {
+		if canonical := retiredExporterPath(rel); canonical != "" &&
+			(managedPathIdentity(rel) == managedPathIdentity(canonical) || missingPending[canonical]) {
+			continue // already checked by the probe or a pending alias
+		}
 		if missingPending[managedMapKey(missingPending, rel)] || handledEntries[managedMapKey(handledEntries, rel)] {
 			continue
 		}
@@ -251,7 +274,7 @@ func updateHosts(root string, st *installState) ([]Host, error) {
 		}
 	}
 	if len(hosts) == 0 {
-		return nil, fmt.Errorf("scaffold: no installed agent host found; run mulix init --host claude or --host dsh")
+		return nil, fmt.Errorf("scaffold: no installed agent host found; run the setup-mulix skill and select claude or dsh")
 	}
 	return hosts, nil
 }
@@ -316,8 +339,9 @@ func (r *updateRun) removeObsolete(rel string) (err error) {
 	if !validManagedRel(rel) {
 		return fmt.Errorf("scaffold: cannot remove unmanaged path %q", rel)
 	}
+	retired := retiredExporterPath(rel) != ""
 	pending, hasPending := r.state.Pending[managedMapKey(r.state.Pending, rel)]
-	if hasPending && (!r.opts.Force || pending.Stage != "conflict" || len(pending.Sources) > 0) {
+	if hasPending && (retired || !r.opts.Force || pending.Stage != "conflict" || len(pending.Sources) > 0) {
 		r.result.Blocked = append(r.result.Blocked, rel+" (obsolete with pending update; retained)")
 		return nil
 	}
@@ -329,19 +353,31 @@ func (r *updateRun) removeObsolete(rel string) (err error) {
 	if err != nil {
 		return err
 	}
-	// A previous force may already have removed L/B before its metadata save
-	// failed. Only explicit force for a registered ordinary pending may finish
-	// that retirement without a baseline; normal retries remain blocked.
-	if !hasBase && !(r.opts.Force && hasPending) {
-		return fmt.Errorf("scaffold: obsolete baseline missing for %s", rel)
-	}
-	if !r.opts.Force && !r.state.trustedVendor(rel, base, nil) {
-		r.result.Blocked = append(r.result.Blocked, rel+" (obsolete, no trusted baseline; retained)")
-		return nil
-	}
-	if exists && !r.opts.Force && string(local) != string(base) {
-		r.result.Blocked = append(r.result.Blocked, rel+" (obsolete, locally modified; retained)")
-		return nil
+	if retired {
+		switch {
+		case !hasBase && !exists:
+			return nil // an ordinary new installation has neither file
+		case hasBase && !r.state.trustedVendor(rel, base, nil), !hasBase && !legacyVendorMatch(rel, local):
+			r.result.Blocked = append(r.result.Blocked, rel+" (retired exporter, unverified vendor bytes; retained even with --force)")
+			return nil
+		case hasBase && exists && string(local) != string(base):
+			r.result.Blocked = append(r.result.Blocked, rel+" (retired exporter, locally modified; retained even with --force)")
+			return nil
+		}
+	} else {
+		// A previous force may have removed L/B before a metadata save failed.
+		// Only a forced ordinary pending retirement may finish in that case.
+		if !hasBase && !(r.opts.Force && hasPending) {
+			return fmt.Errorf("scaffold: obsolete baseline missing for %s", rel)
+		}
+		if !r.opts.Force && !r.state.trustedVendor(rel, base, nil) {
+			r.result.Blocked = append(r.result.Blocked, rel+" (obsolete, no trusted baseline; retained)")
+			return nil
+		}
+		if exists && !r.opts.Force && string(local) != string(base) {
+			r.result.Blocked = append(r.result.Blocked, rel+" (obsolete, locally modified; retained)")
+			return nil
+		}
 	}
 	if err := r.preserve(rel); err != nil {
 		return err
@@ -381,8 +417,10 @@ func (r *updateRun) removeObsolete(rel string) (err error) {
 		removed += " (pending retirement completed; files already absent)"
 	}
 	r.result.Removed = append(r.result.Removed, removed)
-	removeEmptyParents(r.opts.Root, filepath.Dir(full))
-	removeEmptyParents(r.opts.Root, filepath.Dir(baseFull))
+	if !retired {
+		removeEmptyParents(r.opts.Root, filepath.Dir(full))
+		removeEmptyParents(r.opts.Root, filepath.Dir(baseFull))
+	}
 	return nil
 }
 

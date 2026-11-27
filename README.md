@@ -5,7 +5,7 @@ machine, and the full superpowers skill set together for **Claude Code**
 and **DeepSeek Harness**. It borrows from four existing projects:
 
 - **spec-kit** — the constitution → specify → clarify front half of the
-  workflow, its spec template, preset system, and taskstoissues.
+  workflow, its spec template and preset system.
 - **comet** — the phase state machine, guard-check gating, and (the core
   enforcement mechanism) a Claude Code `PreToolUse` hook that blocks
   `Write`/`Edit` calls that don't match the current phase.
@@ -27,8 +27,9 @@ later as a second agent host (Phase 14) — see [Install into a
 project](#install-into-a-project). The rest of that list is still out of
 scope; [`docs/PLAN.md`](docs/PLAN.md) has the full phase breakdown.
 
-mulix does port spec-kit's **preset** system (a template-override stack)
-and **taskstoissues** (GitHub issue conversion) — see below.
+For GitHub or GitLab delivery changes, use the
+[bound Issue workflow](#publish-and-synchronize-bound-issues). Markdown
+changes do not need a remote.
 
 ## The workflow
 
@@ -38,37 +39,33 @@ specify → clarify → design → tasks → build → verify → archive
 
 | Phase   | What happens | Artifact |
 |---------|--------------|----------|
-| specify | WHAT/WHY, no design | `docs/specs/<change>/spec.md` |
-| clarify | up to 5 targeted questions | spec.md `## Clarifications` |
-| design  | `brainstorming`: classify (bounded / architectural), design, explicit approval | `.mulix/.runtime/<change>/specs/*-design.md` (architectural) |
-| tasks   | `writing-plans`: the approved design becomes an executable plan, self-reviewed, then approved by the human | `docs/changes/<change>/tasks.md` (`## Task N` sections) |
-| build   | `test-driven-development`, executed by `subagent-driven-development` or `executing-plans` (chosen at build start) | code + tests; `.mulix/.runtime/<change>/sdd/tasks/` |
-| verify  | `verification-before-completion`: full suite, spec check, rulings review | `docs/changes/<change>/report.md` |
-| archive | `finishing-a-development-branch`: merge / PR / keep | — |
+| specify | WHAT/WHY, no design | `spec_path`; publish only for a remote tracker |
+| clarify | up to 5 targeted questions | spec `## Clarifications`; remote body then confirmed sync |
+| design  | `brainstorming`: classify, consult applicable ADRs, design, explicit approval | `specs/*-design.md` under runtime (architectural) |
+| tasks   | `writing-plans`: executable tasks and acceptance mapping | per-task Markdown in `tasks_dir`, or legacy `tasks_path` |
+| build   | `test-driven-development` with the chosen executor | code, tests and `sdd/<plan>/` evidence |
+| verify  | `verification-before-completion`: full suite, spec check, rulings review | `report_path` and current verification receipt |
+| archive | `finishing-a-development-branch`: merge / PR / keep | local archive; optional spec Issue close afterward |
 
-A change's files live in three places: `docs/specs/<change>/` holds the
-requirements doc, meant to stay a useful reference long after the
-change is archived; `docs/changes/<change>/` holds the plan (`tasks.md`)
-and the verification report; `.mulix/.runtime/<change>/` holds
-everything retained while the change runs — its state (`state.yaml`),
-the approved design doc in `specs/`, and the native execution workspace in
-`sdd/<plan>/`. SDD keeps `plan-path`, `progress.md`, task briefs/reports,
-`task-N-tests.log`, review-range diffs, and its own `.gitignore`, as needed by
-the executor. These records support recovery and build guards; they are not
-removed at the end of execution.
+Run `mulix state show` for the current change's layout, tracker and paths.
+After tracker setup, `mulix new` pins `runtime-issues-v1` and that tracker:
+`.mulix/.runtime/<change>/spec.md`, `issues/NN-short-name.md` (one file per
+numbered task), and `report.md`. Markdown is local-only. GitHub/GitLab use
+these paths for drafts, then retain snapshots of the bound authoritative Issue
+bodies. Changing the project default affects future changes only. Without
+tracker setup and for existing legacy changes, the spec and single `tasks.md`
+plan and report remain in `docs/specs/<change>/` and `docs/changes/<change>/`.
+Legacy and native changes can coexist without a migration.
 
-The retained per-change runtime directories are **`specs/`, `tests/` and
-`sdd/`**. New changes start with an empty `tests/`; it holds only authored
-Karate `.feature` entries and helpers, with no JAR, runtime reports or logs.
-Visual-companion sessions, diagnostic material, ad-hoc RED/rerun logs,
-verification tooling, relocation manifests and build binaries use private,
-context-scoped system scratch instead. Necessary command/output summaries
-stay in the existing ledger, task reports, or the final report at
-`docs/changes/<change>/report.md`. Runtime permissions still exclude another
-change, the CLI-owned `state.yaml`, and archived changes. Historical
-`brainstorm/`, `verification/`, `migrations/`, and `_shared/` data is preserved,
-not silently cleaned by init/update; legacy ignore rules continue to protect
-old session keys.
+The runtime directory also holds `state.yaml`, design docs in `specs/`,
+authored Karate sources in `tests/` and execution records in `sdd/<plan>/`
+(`sdd/issues/` for native). The latter retains the plan marker, progress ledger,
+briefs/reports, task logs and review packages. New changes start with an empty
+`tests/`; it holds only authored Karate `.feature` entries and helpers.
+Visual companions, diagnostics, ad-hoc RED/rerun logs, verification tooling,
+migration manifests and build binaries go in private context-scoped system
+scratch. Put necessary command/output summaries in the existing ledger or report.
+Historical runtime directories and older session-key ignore rules are preserved.
 
 Projects that opt into Karate use the `karate-jsonl` suite described in the
 [quality policy template](assets/templates/quality-template.md). Task runs
@@ -78,29 +75,23 @@ an existing task result without launching another test run. Supply the pinned
 RC1 JAR separately; `init` and `update` do not install Java or a JAR.
 
 New changes use a local-calendar-date ID, for example
-`2026-10-14-add-login`. The spec, change, and runtime directories share
-that ID; same-day/same-title collisions get `-2`, `-3`, etc. Existing
-`001-*` changes are not renamed and still work with `mulix state select`.
-The artifact filenames remain `spec.md`, `tasks.md`, and `report.md`.
+`2026-10-14-add-login`. Collisions get `-2`, `-3`, etc. Existing `001-*`
+changes keep their IDs and remain selectable with `mulix state select`.
 
 Two mechanisms provide workflow control from that state:
 
-1. **Guards** (`internal/guard`) check concrete evidence before a
-   transition applies — an artifact exists and is non-empty, the design
-   approval and execution method are recorded, tasks.md has `## Task N`
-   sections numbered 1..n, the execution ledger has a `Task N: complete`
-   line for every task, and source-bound CLI receipts prove actual mapped
-   RED/GREEN runs (or reasoned non-code CHECKs). Final verification executes
-   every project-configured mandatory suite and binds the reviewed report.
+1. **Guards** check the defined artifacts, local approval flags, the owning
+   ledger and actual execution receipts. A separate remote-sync check runs
+   first on both read-only `mulix guard` and the locked `state transition`;
+   recovery `--force` cannot override it. Final verification runs every
+   mandatory suite and binds the reviewed report.
 2. **The PreToolUse hook** (`mulix hook`) checks Claude Code's
-   `Write`/`Edit` calls against the phase whitelist, including runtime
-   subdirectories (design: `specs/`; build: `sdd/` and authored `tests/`
-   files). Transient output is
-   scoped to the resolved scratch directory: design writes `brainstorm/`,
-   build/verify write `verification/` or `migrations/`, and diagnostics use
-   `diagnosing-superpowers/` in any phase. Raw
-   `state.yaml` edits are denied through these tools, not through every
-   possible writer.
+   `Write`/`Edit` against the phase whitelist. It protects exact published
+   snapshots even where a phase permits drafts. The check does not apply to
+   other writers; use the confirmed `tracker apply` path, not another writer.
+   Transient output is scoped to the resolved scratch directory:
+   `brainstorm/` in design, `verification/` or `migrations/` in build/verify,
+   and `diagnosing-superpowers/` for diagnostics. `state.yaml` is CLI-owned.
 
 ### Enforcement boundary — not a security sandbox
 
@@ -181,13 +172,9 @@ physical-path policy as absolute targets. State updates use bounded native proce
 isolates context, **not source-file edits, Git branches, ports or databases**;
 multiple sessions editing the same source still need coordination.
 
-After upgrading the CLI/resources, install the new startup hook explicitly:
+After upgrading the CLI/resources, invoke the `setup-mulix` skill and explicitly select the Claude Code host to install the new startup hook.
 
-```bash
-mulix init --host claude
-```
-
-Init merges SessionStart plus Write/Edit PreToolUse hooks without replacing
+Setup merges SessionStart plus Write/Edit PreToolUse hooks without replacing
 unrelated hook fields; ordinary `mulix update` never edits host settings.
 An already-open session needs restart/resume or explicit identity parameters.
 A real Claude CLI 2.1.312 probe verified SessionStart and PreToolUse for
@@ -201,7 +188,7 @@ DSH-only init installs no Claude hooks; its agents can use explicit identities.
 
 All fifteen [superpowers](https://github.com/obra/superpowers) skills
 are vendored into `assets/superpowers/` (MIT; license and version
-installed to `.mulix/superpowers/`) and installed by `mulix init` as
+installed to `.mulix/superpowers/`) and installed by `setup-mulix` as
 plain project skills in the host's skills directory (`.claude/skills/`
 on Claude Code, `.dsh/skills/` on DeepSeek Harness) — whole directories,
 with their prompt templates, references, and scripts. mulix doesn't
@@ -217,10 +204,9 @@ patches before replacing the embedded tree. It rewrites
 `superpowers:<skill>` references to the unprefixed
 names, moves retained design/SDD output under `.mulix/.runtime/`, directs
 transient companion/diagnosis material to system scratch (the scripts resolve
-paths through `mulix context show`), and applies a small set
-of exact patches — brainstorming's terminal states give way to mulix's
-design gate, writing-plans writes `docs/changes/<change>/tasks.md` with
-`## Task N` headings and no execution handoff, the executors keep their
+paths through `mulix context show`), and applies exact patches for the phase
+handoffs and execution ledger. The `mulix-tasks` phase skill chooses the
+native per-task template or the legacy combined plan. The executors keep their
 workspace as the change's record. Each patch must match exactly once, so
 upstream drift fails the sync instead of shipping a half-rewritten copy.
 The mulix-owned runtime ledger tools and templates are maintained in
@@ -235,23 +221,23 @@ remain valid.
 
 ## Install into a project
 
-```
-mulix init
-```
+Obtain `skills/setup-mulix/` from the source release matching your installed binary. Copy that independent directory to your host's skill discovery directory (for example, `.claude/skills/setup-mulix/` or `.dsh/skills/setup-mulix/`), then invoke `setup-mulix` in the destination project. The skill asks you to choose hosts and a Markdown, GitHub, or GitLab tracker, presents the selection for confirmation, and runs the bundled setup bridge. Remote targets require an explicit hostname and project; an unreachable target is saved as pending only with your explicit approval. Authentication stays with `gh` or `glab`, and setup does not authorize remote writes.
 
 This writes `.mulix/` (shared constitution, bundled templates, the
 superpowers license/version, `.mulix/.runtime/.gitignore`, and the
 `active`-change marker once a change exists), the skills for the
 selected agent hosts, and — for Claude Code — merges `PreToolUse` and
 `SessionStart` hook entries into `.claude/settings.json` without disturbing any
-hooks/settings you already have. It does not create `docs/specs/` or
-`docs/changes/` — those come from `mulix new`, once there's an actual
-change to hold. `--dir` targets a project directory other than the
-current one; `--force` backs up differing existing resources before
-replacing them. Existing customized files skipped by normal init are not
-silently registered as official vendor content. Init refuses unresolved
-pending updates, including with `--force`: resolve them through update
-first.
+hooks/settings you already have. New changes in a configured project use
+runtime paths, not new `docs/specs/` or `docs/changes/` directories. The
+destination is selected through the skill; an explicit force choice backs up
+differing managed resources before replacing them for the selected hosts.
+The layout applies to the whole project, so setup also checks installed hosts
+that were not selected. Reconcile stale workflow resources with `mulix update`
+before enabling the new layout.
+Existing customized files skipped by normal setup are not silently registered
+as official vendor content. Setup refuses unresolved pending updates, even
+with force: resolve them through update first.
 
 ### Safe resource updates
 
@@ -299,7 +285,11 @@ then installs current N and removes obsolete managed resources or exact
 old entry sources. It cannot be combined with `--accept`. Normal obsolete
 cleanup requires a trusted B and an untouched L. Templates/overrides,
 constitution, runtime data, backups, and conflict candidates are outside
-the updater's obsolete-file ownership.
+the updater's obsolete-file ownership. The retired Issue exporter is a
+narrow exception to force: only its exact installed `SKILL.md` is removed,
+after backing up a verified unmodified vendor copy. Customized, unknown or
+pending copies are reported and retained even with force; resolve those
+manually. Update does not change historical docs or Issue records.
 
 Destructive changes preserve old L, old B, and original metadata in a
 unique `.mulix/.backups/update-*/` directory (`local/`, `baseline/`,
@@ -313,8 +303,9 @@ Conflicted/blocked updates and I/O failures return nonzero and report
 completed work rather than claim overall success. A `partial` outcome names
 mutations already completed within the failing file and the stage that failed;
 it is not a successful whole-file commit. If forced retirement of an obsolete
-pending file deleted L/B before metadata saving failed, repeat explicit force
-to finish retirement; normal retry stays blocked and candidates are retained.
+pending file (other than the retired exporter above) deleted L/B before
+metadata saving failed, repeat explicit force to finish retirement; normal
+retry stays blocked and candidates are retained.
 Windows case-only path aliases share managed/shipped identity, and excluded
 overrides remain excluded regardless of directory casing.
 
@@ -327,14 +318,7 @@ filesystems atomicity promise.
 
 ### Agent hosts
 
-Skills are installed per host, selected with a repeatable
-comma-separated flag (default `claude`):
-
-```
-mulix init                     # Claude Code only (historical default)
-mulix init --host dsh          # DeepSeek Harness only
-mulix init --host claude,dsh   # both
-```
+Skills are installed per host. Select Claude Code, DeepSeek Harness, or both when invoking `setup-mulix`.
 
 | Host | Skills directory | Enforcement | Bootstrap |
 |------|------------------|-------------|-----------|
@@ -356,11 +340,10 @@ checks inside `mulix state transition` are the enforcement.
 them from installation metadata and baseline skill footprints, falling
 back only to exact current/legacy entry footprints), so neither a
 claude-only nor a dsh-only project grows the other host's tree. Without
-host evidence it asks for `mulix init --host ...`, not default Claude.
+host evidence it asks for explicit selection through `setup-mulix`, not default Claude.
 A dsh project's `AGENTS.md` section is refreshed only when its canonical
 entry is ready; blocked migration does not point it at a missing entry.
-To add a host to an existing project, re-run `mulix init --host dsh`
-(idempotent — it fills in only what's missing).
+To add a host to an existing project, re-run `setup-mulix` and select that host (idempotent — it fills in only what's missing).
 
 ## Everyday commands
 
@@ -379,16 +362,16 @@ transition`, and `guard`; each defaults to the active change, which
 `state select` sets. `mulix new --branch <name>` records a git branch
 name in the change's state — mulix does not create the branch itself.
 
-`mulix state transition --force --reason "recovery explanation"` applies a
-legal transition despite failed readiness, and records failed checks, reason and
-time in state. It is recovery, not delivery acceptance. `state show` reports the
-override count; a forced archive can be archived but unqualified. Receipts and
-override records are not settable through `state set`.
+`mulix state transition --force --reason "recovery explanation"` can bypass
+ordinary readiness for a legal transition, recording failed checks, the
+reason and time. It cannot bypass tracker sync; a forced archive can be
+archived but unqualified. `state show` reports the override count. Receipts
+and override records are not settable through `state set`.
 
-Settable fields: `spec_path`, `tasks_path`, `report_path`,
-`clarify_skipped`, `design_track` (`bounded|architectural`),
-`design_path`, `design_approved`, `execution_method`
-(`subagent-driven|inline`), `verify_result`, `archive_confirmation`.
+Settable fields: `clarify_skipped`, `design_track` (`bounded|architectural`),
+`design_path`, `design_approved`, `execution_method` (`subagent-driven|inline`),
+`verify_result`, and `archive_confirmation`. Legacy can also set `spec_path`,
+`tasks_path` and `report_path`; native paths are pinned.
 
 `mulix hook` is the `PreToolUse` entry point Claude Code invokes; you
 won't normally run it by hand.
@@ -402,8 +385,10 @@ or generic JSON-lines adapter. Every configured suite is mandatory at final
 verification; declare nested modules and integration suites explicitly.
 
 - spec.md: one `mulix-acceptance` YAML fence, AC → FR + observable expectation.
-- tasks.md: one `mulix-tests` YAML fence, TC → AC/task + point, Given/When/Then,
-  suite, exact emitted test identity and test source file. Cover every AC/task.
+- Native task documents: one `mulix-tests` YAML fence per numbered task.
+  For legacy, use one fence in the combined `tasks.md`. Map each TC to an
+  AC/task, point, Given/When/Then, suite, emitted test identity and source file.
+  Cover every AC and task across the plan.
 - report.md: one `mulix-review` YAML fence, reviewer reference, `result: approved`
   and `blocking: []`. Semantic test quality and reviewer independence need review.
 
@@ -412,9 +397,10 @@ verification; declare nested modules and integration suites explicitly.
 mulix test run --task 1 --stage red
 # Implement without changing the mapped test or approved contract, then:
 mulix test run --task 1 --stage green
-# A reasoned documentation/verification task instead uses --stage check.
+# Record each verified task in the owning ledger with its current receipt.
+# A reasoned documentation/verification task uses --stage check.
 mulix state transition build-complete
-# Obtain and record whole-change review in the existing final report, then:
+# Obtain and record whole-change review in the final report at report_path,
 mulix verify
 mulix state transition verify-pass
 # Get the human's finishing decision before archive confirmation.
@@ -431,8 +417,8 @@ full streams live in private system scratch, while existing reports retain
 summaries and state retains per-test counts/identities and stream digests.
 
 Final verification also binds the report and Git revision. Source, policy,
-contract or report changes stale normal verify/archive acceptance; checkbox-only
-step progress does not. `mulix verify` can refresh evidence in not-yet-archived
+contract or report changes stale normal verify/archive acceptance; only the
+legacy parser normalizes verified checkbox-only progress. `mulix verify` can refresh evidence in not-yet-archived
 archive phase after authorized finishing changes. If it fails there,
 `mulix state transition verify-fail` returns to build; already archived changes
 cannot reopen through that event. Directly setting `verify_result=pass` creates
@@ -445,23 +431,22 @@ native-platform/real-host qualification still need their own controls (P1/P2).
 
 ## Templates
 
-`assets/templates/*.md` are installed to `.mulix/templates/` by `mulix
-init`. `spec-template.md` and `constitution-template.md` mirror
-spec-kit's (`FR-###`/`SC-###` numbering, User Scenarios, `##
-Clarifications`, principle placeholders). `tasks-template.md` is the
-layout writing-plans produces: plan header with Spec and Design links,
-Global Constraints, Review Focus, and one `## Task N: <name>` section
-per task with RED → GREEN → commit steps. Steps start as
-`- [ ] **Step N: ...**`; mark only steps actually executed and verified
-`- [X] **Step N: ...**` (capital X). This status-only edit to an approved
-plan is allowed, but task definitions, commands, and other approved text
-stay unchanged. An unperformed or unauthorized commit remains `[ ]` even
-when GREEN passes. Checkboxes do not replace ledger or runner receipts.
+Setup installs `assets/templates/*.md` in `.mulix/templates/`.
+`spec-template.md` and `constitution-template.md` mirror spec-kit's format.
+For native plans, use `issue-task-template.md` for each `NN-short-name.md`.
+Number from 1 without gaps, matching the one `## Task N:` heading and
+its matrix. Record steps and `- Task N: complete (receipt <id>)` in the
+owning ledger; don't change task Markdown to record progress.
 
-Guards also require the literal `## Clarifications` heading when clarification
-is recorded, `## Task N` headings numbered 1..n outside code fences, and the
-acceptance contracts above. Executors extract task briefs by those headings;
-ledger `Task N: complete` lines remain structural progress records.
+For legacy only, use `tasks-template.md`: one combined file with plan
+header, Spec and Design links, Global Constraints, Review Focus and ordered
+`## Task N:` sections. Mark only verified steps `[X]`; leave skipped steps
+unchecked, including any unauthorized commit. Checkboxes and the legacy
+plain completion line are progress, not runner evidence.
+
+The `clarify-complete` guard checks for a `## Clarifications` heading.
+Task headings outside code fences and the acceptance mappings drive review,
+brief extraction and verification.
 
 The phase skills (`assets/skills/mulix-*`) are thin: `mulix-specify` and
 `mulix-clarify` port spec-kit's specify/clarify commands; `mulix-design`,
@@ -511,14 +496,51 @@ preset id already listed in the bundled or a configured catalog. mulix
 ships with no bundled preset content yet (unlike spec-kit's lean/
 constitution-sync), so the bundled catalog is currently metadata-only.
 
-## Converting tasks to GitHub issues
+## Publish and synchronize bound Issues
 
-The `mulix-taskstoissues` skill (installed by `mulix init` like any other
-skill) turns a change's `tasks.md` into one GitHub issue per task, via the
-`gh` CLI. Unlike spec-kit's version (which calls a GitHub MCP server's
-tools), this needs nothing beyond `gh auth login` already having been
-run — no MCP server configuration required. It is phase-independent: it
-works any time `tasks.md` exists and is not gated by `internal/flow`.
+Only native GitHub/GitLab changes use these commands. They use the
+change's pinned host, project and Issue identities through the caller's
+`gh` or `glab` authentication, not the ambient Git remote or default CLI
+project. Markdown and legacy need no tracker options or network access.
+
+1. **Specify:** write the local spec draft. Run `mulix tracker publish spec
+   --dry-run`, review the exact target and body, then after explicit approval
+   run `mulix tracker publish spec --expect TOKEN`.
+2. **Clarify:** for a bound spec, make any authorized edit on its authoritative
+   Issue, preserving the binding marker. Review `mulix tracker preview spec`
+   and get confirmation before `mulix tracker apply spec --expect TOKEN`.
+   Apply writes only the local snapshot. Use the same `preview`/`apply` pattern
+   for `task-N` as appropriate. If local changes conflict, review a new preview
+   with `--backup-local` and pass that flag and token to apply. An old token
+   cannot approve new content or another Issue.
+3. **Tasks:** write one draft per task using the per-task template. Run
+   `mulix tracker publish tasks --dry-run`, then after exact authorization
+   `mulix tracker publish tasks --expect TOKEN`. Pending publication uses a
+   fresh dry run for reconciliation; it never blindly retries creation.
+
+Publication is not automatic. Specify, clarify and design exits recheck the
+verified spec; from `tasks-complete` through `archived`, the forward gates
+also check the exact set of bound task documents. Missing, inaccessible,
+replaced or drifted bindings block the transition before any force override.
+`verify-fail` returns to Build locally without checking the remote.
+
+### Optional Issue close
+
+- **Task:** in active Build, after the real current GREEN/CHECK receipt and
+  its matching native ledger entry, run `mulix tracker close task-N --dry-run`.
+  With separate explicit authorization, run `mulix tracker close task-N
+  --expect TOKEN`.
+- **Spec:** after `archived` succeeds, run `mulix tracker close spec --change
+  ID --dry-run`. With separate explicit authorization, run `mulix tracker
+  close spec --change ID --expect TOKEN`. Use the explicit archived ID after
+  global active is cleared; a session bound to a different change may not
+  mutate it. Failure to close leaves the local archive intact; review a fresh
+  dry run before retrying. GitLab hosts must support WorkItem closure; there
+  is no fallback mutation through a reusable IID.
+
+Closing an Issue is optional and does not run tests, authenticate review,
+prove target-branch integration, or replace archival confirmation. Tokens
+bind exact operations and evidence; they are not human identity or consent.
 
 ## Development
 

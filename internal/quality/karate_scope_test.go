@@ -2,6 +2,9 @@ package quality
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -126,4 +129,94 @@ func TestKarateContractRejectsInvalidOwnership(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIssueTaskDocumentsAndKarateScopes(t *testing.T) {
+	p := Project{Root: t.TempDir(), Change: "001-x", SpecPath: ".mulix/.runtime/001-x/spec.md", TasksDir: ".mulix/.runtime/001-x/issues"}
+	spec := strings.TrimSuffix(specFixture, "```\n") + "  - id: AC-002\n    requirement: FR-001\n    expected: The persisted value can still be retrieved.\n```\n"
+	put(t, p.Root, p.SpecPath, spec)
+	put(t, p.Root, PolicyPath, "schema: mulix.quality.v1\nsuites:\n  - id: karate\n    format: karate-jsonl\n    karate:\n      version: 2.1.5.RC1\n      sha256: "+strings.Repeat("a", 64)+"\n")
+	for _, rel := range []string{karateA, karateB, karateFinal, karateHelper} {
+		put(t, p.Root, rel, "fixture\n")
+	}
+	file1, file2 := p.TasksDir+"/01-value.md", p.TasksDir+"/002-read.md"
+	doc := func(n int, feature, scenario string) string {
+		return fmt.Sprintf("## Task %d: A real check\n\n", n) + "```mulix-tests\n" + fmt.Sprintf(`tasks:
+  - number: %[1]d
+    kind: code
+cases:
+  - id: TC-%03[1]d
+    criterion: AC-%03[1]d
+    task: %[1]d
+    point: literal value
+    given: a configured fixture
+    when: the action runs
+    then: the expected result is returned
+    suite: karate
+    test: '%[2]s#%[3]s'
+    file: '%[2]s'
+`, n, feature, scenario)
+	}
+	body1 := doc(1, karateA, "保存成功") + "```\n"
+	body2 := doc(2, karateB, "second") + fmt.Sprintf(`verify_cases:
+  - id: TC-003
+    criterion: AC-001
+    task: 0
+    suite: karate
+    test: '%[1]s#joined'
+    file: '%[1]s'
+`, karateFinal) + "```\n"
+	put(t, p.Root, file1, body1)
+	put(t, p.Root, file2, body2)
+
+	docs, err := ReadTaskDocuments(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 2 || docs[0].Number != 1 || docs[0].Path != file1 || string(docs[0].Markdown) != body1 || docs[1].Number != 2 || docs[1].Path != file2 || string(docs[1].Markdown) != body2 {
+		t.Fatalf("expected complete task documents in numeric, not lexical, order: %+v", docs)
+	}
+	c, err := LoadContract(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := LoadPolicy(p.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for n, want := range map[int][]string{1: {karateA}, 2: {karateB}, 0: {karateFinal, karateA, karateB}} {
+		sel, err := karateInputs(p, c, policy.Suites[0], n)
+		if err != nil || !slices.Equal(sel.Features, want) || !slices.Equal(sel.Helpers, []string{karateHelper}) {
+			t.Fatalf("task %d scope: %+v %v", n, sel, err)
+		}
+	}
+	if final := c.SelectedCases(0); len(final) != 3 || final[2].Task != 0 || final[2].File != karateFinal {
+		t.Fatalf("wrong final-only mapping: %+v", final)
+	}
+
+	t.Run("another change directory", func(t *testing.T) {
+		borrowed := p
+		borrowed.TasksDir = ".mulix/.runtime/other/issues"
+		put(t, p.Root, borrowed.TasksDir+"/01-value.md", body1)
+		put(t, p.Root, borrowed.TasksDir+"/002-read.md", body2)
+		if docs, err := ReadTaskDocuments(borrowed); err == nil || len(docs) != 0 {
+			t.Fatalf("accepted another change's task documents: %+v %v", docs, err)
+		}
+	})
+	t.Run("linked task", func(t *testing.T) {
+		outside := filepath.Join(t.TempDir(), "outside.md")
+		if err := os.WriteFile(outside, []byte(body2), 0600); err != nil {
+			t.Fatal(err)
+		}
+		linked := filepath.Join(p.Root, file2)
+		if err := os.Remove(linked); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, linked); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		if docs, err := ReadTaskDocuments(p); err == nil || len(docs) != 0 {
+			t.Fatalf("accepted linked task input: %+v %v", docs, err)
+		}
+	})
 }

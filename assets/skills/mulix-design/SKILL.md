@@ -11,11 +11,18 @@ output goes, which path applies, and how the phase ends.
 
 ## Inputs
 
-Read `docs/specs/<change>/spec.md` (the clarified WHAT/WHY — including
-`## Clarifications`) and `.mulix/memory/constitution.md` if it has real
-content. The spec is the requirements authority for the design: don't
-re-ask what it already answers, and don't design past its Out of Scope.
-Read-only exploration of the codebase is always allowed.
+Run `mulix state show` and read the clarified spec at `spec_path` and
+`.mulix/memory/constitution.md` if substantive. The spec is the requirements
+authority: do not re-ask answered questions or design past its Out of Scope.
+
+Follow the project's domain-doc pointer (normally `docs/agents/domain.md`)
+to the glossary and the ADRs relevant to this design. Cite each applicable
+ADR by ID/path and the constraint it contributes; use the decision as
+settled context, not something to restate or ask the human to approve
+again. If your approach contradicts one, name it and explain why revisiting
+it is justified. Draft a new decision only if a durable tradeoff needs a
+record; capture the candidate in the permitted design output, not by
+writing or moving ADR/glossary files during this phase.
 
 ## Paths
 
@@ -75,8 +82,8 @@ tasks phase does that. For a bounded design, carry its approach, files
 touched, and testing plan forward in your reply so the tasks phase can
 write them down: it's the only record of an in-chat design.
 
-The guard checks the track is set, the approval is recorded, and (for
-architectural) the design doc exists, is non-empty, and sits under
-`.mulix/.runtime/<change>/specs/`. It cannot check that the approval was
-real — never set `design_approved true` on silence or on approval of an
-earlier, different stage.
+The existing gate checks track, explicit design approval and, for
+architectural, a nonempty design under the change's `specs/` directory.
+For GitHub/GitLab the bound spec must still be current; handle drift via
+authorized `tracker preview spec` / `tracker apply spec`, not a design-phase
+edit or a forced transition. Do not record approval of a different design.

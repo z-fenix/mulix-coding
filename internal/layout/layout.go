@@ -40,7 +40,10 @@ const (
 // Subdirectories of a change's runtime directory.
 const (
 	// StateFile is mulix's own phase state. Never hand-edited.
-	StateFile = "state.yaml"
+	StateFile         = "state.yaml"
+	RuntimeSpecFile   = "spec.md"
+	RuntimeIssuesDir  = "issues"
+	RuntimeReportFile = "report.md"
 	// DesignDir holds the design doc approved in the design phase.
 	DesignDir = "specs"
 	// TestsDir holds authored Karate cases and executable helpers, never output.

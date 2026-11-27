@@ -5,10 +5,11 @@ description: Use when the active change is in the specify phase, to write the fu
 
 # Specify phase
 
-Write `docs/specs/<change>/spec.md` from `.mulix/templates/spec-template.md`
-(or `mulix preset resolve spec-template` if a preset overrides it),
-replacing every placeholder with concrete details while preserving
-section order and headings.
+Run `mulix state show`. For `runtime-issues-v1`, write the draft at its
+pinned `spec_path`. For legacy, use its recorded path or
+`docs/specs/<change>/spec.md` if unset. Fill `.mulix/templates/spec-template.md`
+(or `mulix preset resolve spec-template` if a preset overrides it) with
+concrete details, preserving the section order and headings.
 
 This phase fixes WHAT the change must do and WHY. HOW — approaches,
 components, data flow — is the design phase's job (brainstorming), and
@@ -85,8 +86,22 @@ note the assumption rather than raising a clarification question.
 
 ## Advancing out of this phase
 
-```
-mulix state set spec_path docs/specs/<change>/spec.md
+For legacy only, record the actual path using `mulix state set spec_path
+<path>`. The native path is already set.
+
+For a native GitHub/GitLab change, publish the spec through this one route:
+
+1. Run `mulix tracker publish spec --dry-run`. Show the human the exact
+   target and content and obtain authorization to publish them.
+2. Run `mulix tracker publish spec --expect TOKEN` with that token. If an
+   earlier publication is pending, use a fresh dry run and authorization
+   for reconciliation; do not create another Issue by hand.
+
+If the spec is already bound, preserve its snapshot and check sync instead
+of republishing. Local Markdown and legacy changes skip publication. Then:
+
+```sh
+mulix guard spec-complete
 mulix state transition spec-complete
 ```
 

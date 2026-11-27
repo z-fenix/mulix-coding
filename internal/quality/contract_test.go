@@ -1,9 +1,11 @@
 package quality
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -97,6 +99,10 @@ func TestFingerprintChangesAndCheckboxNormalization(t *testing.T) {
 	before, err := Fingerprint(p, c, 1)
 	if err != nil {
 		t.Fatal(err)
+	}
+	const legacyContract = "99dbb3524673ab6508e359b96ef649f8cf327bc89d8ca6a8110f6f50e183d15b"
+	if before.Contract != legacyContract {
+		t.Fatalf("legacy contract digest = %s, want %s", before.Contract, legacyContract)
 	}
 	put(t, p.Root, p.TasksPath, strings.Replace(planFixture, "[ ] **Step", "[X] **Step", 1))
 	after, err := Fingerprint(p, c, 1)
@@ -214,5 +220,72 @@ func TestFingerprintRejectsMissingOrLinkedTestInput(t *testing.T) {
 	}
 	if _, err := Fingerprint(p, c, 1); err == nil {
 		t.Fatal("linked test input accepted")
+	}
+}
+
+func TestIssueTaskPolicySnapshot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Git probe uses a POSIX executable wrapper")
+	}
+	p := Project{Root: t.TempDir(), Change: "001-x", SpecPath: ".mulix/.runtime/001-x/spec.md", TasksDir: ".mulix/.runtime/001-x/issues"}
+	put(t, p.Root, p.SpecPath, specFixture)
+	put(t, p.Root, p.TasksDir+"/01-value.md", planFixture)
+	put(t, p.Root, PolicyPath, policyFixture)
+	put(t, p.Root, "value_test.go", "package fixture\n")
+	accepted, err := LoadContract(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := Fingerprint(p, accepted, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const alternate = policyFixture + "  - id: extra\n    format: karate-jsonl\n    karate:\n      version: 2.1.5.RC1\n      sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+	for _, tc := range []struct {
+		name string
+		read func(Project, Contract, int) (Snapshot, error)
+	}{
+		{"Karate sources", Fingerprint},
+		{"Karate runtime", ExecutionFingerprint},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			put(t, p.Root, PolicyPath, policyFixture)
+			if tc.name == "Karate runtime" {
+				// With valid feature scope, only an unexpected runtime lookup
+				// can fail; no JAR belongs to the accepted policy.
+				put(t, p.Root, karateFinal, "Feature: Probe\n")
+				t.Setenv("MULIX_KARATE_JAR", "")
+			}
+			probe := t.TempDir()
+			put(t, probe, "replacement.yaml", alternate)
+			// sourcePaths invokes Git after it validates the live contract,
+			// before choosing test sources or tooling. Switch policy exactly
+			// at that boundary, with no racing file loop or clock guesses.
+			if err := os.WriteFile(filepath.Join(probe, "git"), []byte(`#!/bin/sh
+[ "$3" = rev-parse ] && [ "$4" = --is-inside-work-tree ] || exit 1
+cp "$MULIX_POLICY_PROBE" "$2/.mulix/quality.yaml" || exit 2
+printf 'false\n'
+`), 0700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("MULIX_POLICY_PROBE", filepath.Join(probe, "replacement.yaml"))
+			t.Setenv("PATH", probe+string(os.PathListSeparator)+os.Getenv("PATH"))
+			got, err := tc.read(p, accepted, 0)
+			if written, readErr := ReadProjectFile(p.Root, PolicyPath); readErr != nil || string(written) != alternate {
+				t.Fatalf("fixture did not replace policy at the Git boundary: %v", readErr)
+			}
+			if err != nil || got.Contract != before.Contract || got.Karate != "" || got.KarateSources != "" {
+				t.Fatalf("uncaptured policy affected %s: %+v %v", tc.name, got, err)
+			}
+		})
+	}
+	put(t, p.Root, PolicyPath, alternate)
+	requested, err := LoadPolicy(p.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := Run(context.Background(), p, accepted, requested, 1, "green", t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "accepted native contract policy") || len(r.Suites) != 0 {
+		t.Fatalf("run did not reject policy outside the accepted version before execution: %+v %v", r, err)
 	}
 }

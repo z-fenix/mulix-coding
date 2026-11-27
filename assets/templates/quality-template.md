@@ -63,8 +63,10 @@ Keep reports, logs, credentials and the JAR out of `tests/`.
 For each case, put its root-relative source in `file` and
 `<file>#<exact scenario name>` in `test` (use the expanded Outline name).
 Declare final-only mandatory cases under `verify_cases` in the same
-`mulix-tests` block: use `id`, `criterion`, `suite`, `file`, and `test`, without
-`task`. Task commands use only the mapped task's entries; final verification
+`mulix-tests` fence. In a native task directory the responsible task declares
+these cases in its own file. Use `id`, `criterion`, `suite`, `file`, and `test`,
+and either omit `task` or set it to `0`. Task commands use only the mapped
+entries; final verification
 runs all task and final entries, not helpers as standalone cases. It also runs
 all other configured mandatory suites. Read the produced JSONL evidence; a zero
 exit on a dry run, empty scope, or skipped required scenario is not PASS.
@@ -82,12 +84,15 @@ bound: promote important inputs to tracked files and qualify externally in CI.
 Use `mulix test run --task N --stage red`, then implement, then `--stage green`.
 A successful RED command exits zero because it observed the required test failure;
 the receipt retains the subprocess's actual nonzero exit. Tests, policy, spec
-and plan definitions stay stable between RED/GREEN; verified checkbox-status
-edits are normalized. Non-code tasks declare a concrete reason and use `check`.
+and plan definitions stay stable between RED/GREEN. Keep native step progress
+in the SDD ledger; only legacy `tasks.md` normalizes checkbox-status edits.
+Non-code tasks declare a concrete reason and use `check`.
 The CLI saves receipts to existing state.yaml and summaries to task reports.
 Human prose or `state set verify_result pass` cannot substitute for execution.
 
-Final review goes in `docs/changes/<change>/report.md`:
+Record independent review in the native change's pinned
+`.mulix/.runtime/<change>/report.md`. For a legacy change use its existing
+`docs/changes/<change>/report.md`:
 
 ```mulix-review
 reviewer: actual reviewer identity or review session reference
@@ -96,9 +101,11 @@ blocking: []
 ```
 
 Run `mulix verify` after review, then `mulix state transition verify-pass`.
-All mandatory suites and mapped cases must pass against current inputs. Editing
-source, tests, spec, policy, plan definitions or the final report invalidates
-final evidence. If finishing changes the revision after verify-pass, rerun
+All mandatory suites and mapped cases must pass against current inputs. The
+native report records the spec and task paths and SHA-256 digests actually
+run against, the checked receipt IDs, and suite results. Editing source,
+tests, spec, policy, task definitions (including file names) or the final
+report invalidates final evidence. If finishing changes the revision after verify-pass, rerun
 `mulix verify` in the not-yet-archived archive phase before `archived`.
 Failed/incomplete retries supersede old successes. A corrective `verify-fail`
 or a new `build-complete` verification cycle invalidates old final verification;
@@ -106,7 +113,7 @@ historical task RED/GREEN provenance remains. Correct the underlying
 failure; do not use `--force` to claim acceptance. Recovery requires an explicit
 `--reason`, records guard overrides and creates no test qualification.
 
-This is local evidence, not cryptographic attestation. Review identity is a
-local claim; semantic assertion quality and reviewer independence need human
-review. A writer controlling policy, adapters and all local files can forge
+This is local evidence, not cryptographic attestation or proof of integration.
+Review identity is a local claim; semantic assertion quality and reviewer
+independence need human review. A writer controlling policy, adapters and all local files can forge
 claims outside this workflow's assurance boundary.

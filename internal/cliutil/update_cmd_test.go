@@ -203,7 +203,7 @@ func TestInitCmd_ForcePrintsBackupDirectory(t *testing.T) {
 	if err := os.WriteFile(rel, []byte("LOCAL\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, err := runPresetCLI(t, "init", "--force")
+	out, err := runPresetCLI(t, "_setup", "--force", "--host", "claude", "--tracker", "markdown")
 	if err != nil || !strings.Contains(out, "backup:") || !strings.Contains(out, ".backups") {
 		t.Fatalf("init backup not visible: %v %s", err, out)
 	}

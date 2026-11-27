@@ -5,6 +5,8 @@ import (
 	"path"
 	"slices"
 	"strings"
+
+	"github.com/z-fenix/mulix-coding/internal/layout"
 )
 
 // Latest deliberately returns a later failed attempt instead of falling back
@@ -23,6 +25,9 @@ func validReceipt(c Contract, r RunRecord) error {
 	}
 	if err := validateStage(c, r.Task, r.Stage); err != nil {
 		return err
+	}
+	if c.native != nil && !slices.Equal(r.ArtifactInputs, c.native.inputs) {
+		return fmt.Errorf("run %s does not match the current native contract inputs", r.ID)
 	}
 	return outcome(c, r)
 }
@@ -86,10 +91,24 @@ func taskEvidence(p Project, c Contract, records []RunRecord, task Task, require
 	return green, nil
 }
 func ValidateReview(root, report string) error {
+	_, err := ReadReviewedReport(root, report)
+	return err
+}
+
+// ReadReviewedReport returns the exact bytes that contain the review record.
+// The reviewer reference is a local claim, not identity authentication.
+func ReadReviewedReport(root, report string) ([]byte, error) {
 	data, err := ReadProjectFile(root, report)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	if err := validateReview(data); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func validateReview(data []byte) error {
 	var review struct {
 		Reviewer string   `yaml:"reviewer"`
 		Result   string   `yaml:"result"`
@@ -103,8 +122,25 @@ func ValidateReview(root, report string) error {
 	}
 	return nil
 }
+
+// VerificationReportPath selects the one report a final run can attest to.
+// Legacy changes retain their historical report destination.
+func VerificationReportPath(p Project) (string, error) {
+	if p.TasksDir == "" {
+		return path.Join("docs/changes", p.Change, "report.md"), nil
+	}
+	want := layout.ChangeRuntimePath(p.Change, layout.RuntimeReportFile)
+	if p.ReportPath != want {
+		return "", fmt.Errorf("verification report must be %s", want)
+	}
+	return p.ReportPath, nil
+}
+
 func ValidateVerification(p Project, c Contract, records []RunRecord, report string) error {
-	expected := path.Join("docs/changes", p.Change, "report.md")
+	expected, err := VerificationReportPath(p)
+	if err != nil {
+		return err
+	}
 	if report != expected {
 		return fmt.Errorf("verification report must be %s", expected)
 	}
@@ -122,7 +158,7 @@ func ValidateVerification(p Project, c Contract, records []RunRecord, report str
 	if r.Snapshot != current {
 		return fmt.Errorf("verification is stale or belongs to another change/project; run mulix verify again")
 	}
-	policy, err := LoadPolicy(p.Root)
+	policy, err := executionPolicy(p, c)
 	if err != nil {
 		return err
 	}
@@ -151,7 +187,7 @@ func ValidateVerification(p Project, c Contract, records []RunRecord, report str
 	if r.ReportDigest == "" || r.ReportDigest != Digest(data) {
 		return fmt.Errorf("verification report changed after execution")
 	}
-	return ValidateReview(p.Root, report)
+	return validateReview(data)
 }
 
 // Summary is retained in existing reports; full streams stay in private
@@ -159,6 +195,15 @@ func ValidateVerification(p Project, c Contract, records []RunRecord, report str
 func Summary(r RunRecord) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n### Quality run %s\n\n- Stage: %s; task: %d; success: %v\n- Started: %s\n- Finished: %s\n- Source: %s\n- Contract: %s\n", r.ID, r.Stage, r.Task, r.Success, r.Started.Format("2006-01-02T15:04:05.999999999Z07:00"), r.Finished.Format("2006-01-02T15:04:05.999999999Z07:00"), r.Snapshot.Source, r.Snapshot.Contract)
+	if len(r.ArtifactInputs) > 0 {
+		if r.Snapshot.Revision != "" {
+			fmt.Fprintf(&b, "- Revision: %s\n", r.Snapshot.Revision)
+		}
+		fmt.Fprintf(&b, "- Test inputs: %s\n", r.Snapshot.Tests)
+		for _, input := range r.ArtifactInputs {
+			fmt.Fprintf(&b, "- Input %q: SHA-256 %s\n", input.Path, input.SHA256)
+		}
+	}
 	for _, s := range r.Suites {
 		fmt.Fprintf(&b, "- Suite %s: exit %d; passed %d, failed %d, skipped %d\n", s.ID, s.ExitCode, s.Passed, s.Failed, s.Skipped)
 		if s.Format == KarateFormat {

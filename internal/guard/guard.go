@@ -1,7 +1,7 @@
 // Package guard implements the phase-exit readiness checks that gate
 // flow.Apply calls. Each check inspects the filesystem/state for concrete
-// evidence (an artifact exists and is non-empty, every task in tasks.md
-// has a completion line in the execution ledger, a verification report
+// evidence (artifacts are non-empty, every approved task has an execution
+// ledger entry, a verification report
 // was written) rather than trusting the agent's say-so. Guards never
 // mutate state; Run only reports pass/fail plus a remediation hint.
 package guard
@@ -13,8 +13,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/z-fenix/mulix-coding/internal/fileutil"
 	"github.com/z-fenix/mulix-coding/internal/flow"
 	"github.com/z-fenix/mulix-coding/internal/layout"
+	"github.com/z-fenix/mulix-coding/internal/quality"
 )
 
 // Result is the outcome of one named check.
@@ -160,12 +162,15 @@ func checkClarifySkipAcknowledged(_ string, s flow.State) Result {
 	return Result{Name: "clarify-skip-acknowledged", Pass: true}
 }
 
-// checkTasksHaveSections verifies tasks.md is an executable plan: at least
-// one "## Task N" section, numbered 1..n without gaps or duplicates. The
-// build phase's executors extract task briefs by that heading, and the
-// build-complete guard matches ledger lines to it.
+// checkTasksHaveSections verifies the plan has at least one task, with no
+// gaps or duplicate headings. For native plans the validated reader also
+// checks the headings and matrix ownership of each individual document.
 func checkTasksHaveSections(root string, s flow.State) Result {
 	const name = "tasks-have-task-sections"
+	if s.ArtifactLayout == flow.RuntimeIssuesLayout {
+		_, err := quality.ReadTaskDocuments(s.QualityProject(root))
+		return qualityResult(name, err)
+	}
 	if s.TasksPath == "" {
 		return Result{Name: name, Pass: false, Next: "No tasks path recorded in state."}
 	}
@@ -185,11 +190,21 @@ func checkTasksHaveSections(root string, s flow.State) Result {
 	return Result{Name: name, Pass: true}
 }
 
-// checkTasksInChangeDir verifies tasks.md exists, is non-empty, and lives
-// in the change's own docs/changes/<change>/ directory — the one place the
-// tasks phase may write it.
+// checkTasksInChangeDir locates the task artifact in the change's own paths.
 func checkTasksInChangeDir(root string, s flow.State) Result {
 	const name = "tasks-artifact-present"
+	if s.ArtifactLayout == flow.RuntimeIssuesLayout {
+		want := layout.ChangeRuntimePath(s.Change, layout.RuntimeIssuesDir)
+		if s.PlanPath() != want {
+			return qualityResult(name, fmt.Errorf("task directory must be the change's own %s", want))
+		}
+		probe, err := fileutil.ControlPath(root, want+"/.probe", false)
+		if err == nil {
+			// An existing non-directory component was rejected by ControlPath.
+			_, err = os.Stat(filepath.Dir(probe))
+		}
+		return qualityResult(name, err)
+	}
 	if res := checkArtifactPresent(name, func(s flow.State) string { return s.TasksPath })(root, s); !res.Pass {
 		return res
 	}
@@ -236,38 +251,64 @@ func checkExecutionMethodChosen(_ string, s flow.State) Result {
 	return Result{Name: name, Pass: true}
 }
 
-// checkPlanTasksComplete verifies every "## Task N" section of tasks.md
-// has a "Task N: complete" line in the plan's execution ledger. The ledger
-// (progress.md in the plan's workspace under .mulix/.runtime/<change>/
-// sdd/) is written by the build phase's executor; its first line must name
-// tasks.md, so a ledger belonging to another plan never counts.
+// checkPlanTasksComplete verifies every task has a completion line in the
+// owning plan's ledger. Native identity names the entire task directory.
 func checkPlanTasksComplete(root string, s flow.State) Result {
 	const name = "plan-tasks-complete"
 	tasks, ws, res := loadPlanAndWorkspace(root, s, name)
 	if !res.Pass {
 		return res
 	}
-	ledger, err := os.ReadFile(filepath.Join(ws, "progress.md"))
+	ledger, err := readPlanLedger(root, s, ws)
 	if err != nil {
-		return Result{Name: name, Pass: false, Next: fmt.Sprintf("No ledger at %s. The build phase's executor writes one line per completed task there.", slashRel(root, filepath.Join(ws, "progress.md")))}
+		return qualityResult(name, err)
+	}
+	var done map[int]bool
+	if s.ArtifactLayout == flow.RuntimeIssuesLayout {
+		done = completedReceiptTasks(ledger, tasks, s.QualityRuns)
+	} else {
+		done = CompletedTasks(ledger)
+	}
+	var missing []int
+	for _, task := range tasks {
+		if !done[task.Number] {
+			missing = append(missing, task.Number)
+		}
+	}
+	if len(missing) > 0 {
+		if s.ArtifactLayout == flow.RuntimeIssuesLayout {
+			return Result{Name: name, Pass: false, Next: fmt.Sprintf("Tasks %v need completion lines with their latest GREEN/CHECK receipt IDs: - Task N: complete (receipt <id>).", missing)}
+		}
+		return Result{Name: name, Pass: false, Next: fmt.Sprintf("%d of %d task(s) have no \"Task N: complete\" ledger line yet: %v.", len(missing), len(tasks), missing)}
+	}
+	return Result{Name: name, Pass: true}
+}
+
+func readPlanLedger(root string, s flow.State, ws string) (string, error) {
+	ledgerPath := filepath.Join(ws, "progress.md")
+	ledgerRel := slashRel(root, ledgerPath)
+	var ledger []byte
+	var err error
+	if s.ArtifactLayout == flow.RuntimeIssuesLayout {
+		ledger, err = quality.ReadProjectFile(root, ledgerRel)
+	} else {
+		ledger, err = os.ReadFile(ledgerPath)
+	}
+	if err != nil {
+		return "", fmt.Errorf("no ledger at %s; the build phase's executor writes one line per completed task there: %w", ledgerRel, err)
 	}
 	first, _, _ := strings.Cut(string(ledger), "\n")
 	identity := strings.TrimSpace(first)
 	knownFormat := strings.HasPrefix(identity, "# SDD progress") || strings.HasPrefix(identity, "# SDD ledger")
-	if !knownFormat || !strings.HasSuffix(identity, path.Base(filepath.ToSlash(s.TasksPath))) {
-		return Result{Name: name, Pass: false, Next: fmt.Sprintf("Progress %s does not start with \"# SDD progress — plan: %s\" (legacy \"# SDD ledger\" is also accepted).", slashRel(root, filepath.Join(ws, "progress.md")), s.TasksPath)}
+	matches := knownFormat && strings.HasSuffix(identity, path.Base(filepath.ToSlash(s.TasksPath)))
+	if s.ArtifactLayout == flow.RuntimeIssuesLayout {
+		identity = strings.TrimSuffix(first, "\r")
+		matches = identity == "# SDD progress — plan: "+s.PlanPath() || identity == "# SDD ledger — plan: "+s.PlanPath()
 	}
-	done := CompletedTasks(string(ledger))
-	var missing []int
-	for _, n := range tasks {
-		if !done[n] {
-			missing = append(missing, n)
-		}
+	if !matches {
+		return "", fmt.Errorf("progress %s does not start with \"# SDD progress — plan: %s\" (legacy \"# SDD ledger\" is also accepted)", ledgerRel, s.PlanPath())
 	}
-	if len(missing) > 0 {
-		return Result{Name: name, Pass: false, Next: fmt.Sprintf("%d of %d task(s) have no \"Task N: complete\" ledger line yet: %v.", len(missing), len(tasks), missing)}
-	}
-	return Result{Name: name, Pass: true}
+	return string(ledger), nil
 }
 
 // checkTddEvidencePresent requires runner-owned RED/GREEN receipts for code,
@@ -276,34 +317,52 @@ func checkTddEvidencePresent(root string, s flow.State) Result {
 	return checkTaskExecutionEvidence(root, s)
 }
 
-// loadPlanAndWorkspace reads tasks.md's task numbers and locates its
-// execution workspace, reporting a failed Result under name if either is
-// unavailable.
-func loadPlanAndWorkspace(root string, s flow.State, name string) ([]int, string, Result) {
-	if s.TasksPath == "" {
-		return nil, "", Result{Name: name, Pass: false, Next: "No tasks path recorded in state."}
-	}
-	data, err := os.ReadFile(resolve(root, s.TasksPath))
-	if err != nil {
-		return nil, "", Result{Name: name, Pass: false, Next: fmt.Sprintf("Could not read %s: %v", s.TasksPath, err)}
-	}
-	tasks := TaskNumbers(string(data))
-	if len(tasks) == 0 {
-		return nil, "", Result{Name: name, Pass: false, Next: fmt.Sprintf("%s has no \"## Task N\" sections.", s.TasksPath)}
+// loadPlanAndWorkspace reads the plan's tasks and locates their execution workspace.
+func loadPlanAndWorkspace(root string, s flow.State, name string) ([]quality.Task, string, Result) {
+	var tasks []quality.Task
+	if s.ArtifactLayout == flow.RuntimeIssuesLayout {
+		contract, err := quality.LoadContract(s.QualityProject(root))
+		if err != nil {
+			return nil, "", qualityResult(name, err)
+		}
+		tasks = contract.Tasks
+	} else {
+		if s.TasksPath == "" {
+			return nil, "", Result{Name: name, Pass: false, Next: "No tasks path recorded in state."}
+		}
+		data, err := os.ReadFile(resolve(root, s.TasksPath))
+		if err != nil {
+			return nil, "", Result{Name: name, Pass: false, Next: fmt.Sprintf("Could not read %s: %v", s.TasksPath, err)}
+		}
+		for _, n := range TaskNumbers(string(data)) {
+			tasks = append(tasks, quality.Task{Number: n})
+		}
+		if len(tasks) == 0 {
+			return nil, "", Result{Name: name, Pass: false, Next: fmt.Sprintf("%s has no \"## Task N\" sections.", s.TasksPath)}
+		}
 	}
 	ws, ok := FindWorkspace(root, s)
 	if !ok {
-		return nil, "", Result{Name: name, Pass: false, Next: fmt.Sprintf("No execution workspace for %s under %s/. Run the build through the executor skill (it resolves the workspace with sdd-workspace).", s.TasksPath, layout.ChangeRuntimePath(s.Change, layout.SddDir))}
+		return nil, "", Result{Name: name, Pass: false, Next: fmt.Sprintf("No execution workspace for %s under %s/. Run the build through the executor skill (it resolves the workspace with sdd-workspace).", s.PlanPath(), layout.ChangeRuntimePath(s.Change, layout.SddDir))}
 	}
 	return tasks, ws, Result{Name: name, Pass: true}
 }
 
-// FindWorkspace returns the absolute path of tasks.md's plan workspace
-// under .mulix/.runtime/<change>/sdd/: the subdirectory whose plan-path
-// marker names tasks.md. The marker is git-root-relative (or absolute),
-// so it's compared by path suffix against the root-relative TasksPath. A
-// marker-less sdd/<tasks basename>/ is accepted as a fallback.
+// FindWorkspace locates a plan's retained execution record. Native plans have
+// one workspace bound by an exact Mulix-root-relative directory marker. Old
+// single-file plans still use their historical marker and basename fallback.
 func FindWorkspace(root string, s flow.State) (string, bool) {
+	if s.ArtifactLayout == flow.RuntimeIssuesLayout {
+		if s.PlanPath() != layout.ChangeRuntimePath(s.Change, layout.RuntimeIssuesDir) {
+			return "", false
+		}
+		dir := layout.ChangeRuntimePath(s.Change, layout.SddDir, layout.RuntimeIssuesDir)
+		marker, err := quality.ReadProjectFile(root, dir+"/plan-path")
+		if err != nil || string(marker) != s.PlanPath()+"\n" {
+			return "", false
+		}
+		return resolve(root, dir), true
+	}
 	base := filepath.Join(root, filepath.FromSlash(layout.ChangeRuntimePath(s.Change, layout.SddDir)))
 	entries, err := os.ReadDir(base)
 	if err != nil {

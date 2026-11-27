@@ -11,6 +11,46 @@ import (
 	"testing"
 )
 
+func TestNativeSetupPreflightScopesHostsAndResources(t *testing.T) {
+	root := t.TempDir()
+	if err := PreflightNativeSetup(root, []Host{HostClaude}, false); err != nil {
+		t.Fatalf("fresh setup: %v", err)
+	}
+	if _, err := Init(InitOptions{Root: root, Hosts: []Host{HostClaude, HostDSH}}); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(root, ".dsh/skills/executing-plans/scripts/task-start")
+	if err := os.WriteFile(stale, []byte("old"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, force := range []bool{false, true} {
+		if err := PreflightNativeSetup(root, []Host{HostClaude}, force); err == nil || !strings.Contains(err.Error(), "mulix update") {
+			t.Errorf("stale retained host accepted with force=%v: %v", force, err)
+		}
+	}
+	if err := PreflightNativeSetup(root, []Host{HostDSH}, false); err == nil || !strings.Contains(err.Error(), "mulix update") {
+		t.Fatalf("stale selected host accepted: %v", err)
+	}
+	if err := PreflightNativeSetup(root, []Host{HostDSH}, true); err != nil {
+		t.Fatalf("explicit force path blocked: %v", err)
+	}
+	if err := os.Remove(stale); err != nil {
+		t.Fatal(err)
+	}
+	if err := PreflightNativeSetup(root, []Host{HostClaude}, false); err == nil || !strings.Contains(err.Error(), "mulix update") {
+		t.Errorf("incomplete retained host accepted: %v", err)
+	}
+	if err := PreflightNativeSetup(root, []Host{HostDSH}, false); err != nil {
+		t.Fatalf("setup refused to fill a selected host's missing file: %v", err)
+	}
+	if _, err := Init(InitOptions{Root: root, Hosts: []Host{HostDSH}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := PreflightNativeSetup(root, []Host{HostClaude}, false); err != nil {
+		t.Fatalf("current retained host blocked: %v", err)
+	}
+}
+
 func assertPartialOutcome(t *testing.T, result UpdateResult, rel, completed, failed string) {
 	t.Helper()
 	// Decode the public result contract so the pre-fix test can demonstrate a

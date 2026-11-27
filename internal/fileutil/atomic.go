@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // WriteFile writes and syncs a same-directory temporary file before replacing
@@ -15,6 +16,29 @@ import (
 // Rename on non-Unix platforms. This is not a lock or multi-file transaction.
 func WriteFile(path string, data []byte, mode fs.FileMode) error {
 	return writeFileWith(path, data, mode, writeAndSync, os.Rename)
+}
+
+// WriteFileDurable additionally commits the replacement's directory metadata.
+// Reserve it for checkpoints that must be on disk before an external side
+// effect. The file must belong to root; the caller is responsible for checking
+// path ownership and serializing writers. On error, the replacement can already
+// be visible but must not be treated as durably committed.
+func WriteFileDurable(root, path string, data []byte, mode fs.FileMode) error {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return err
+	}
+	path, err = filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("fileutil: checkpoint must be inside its owning root")
+	}
+	return writeFileWith(path, data, mode, writeAndSync, func(from, to string) error {
+		return replaceDurable(from, to, root)
+	})
 }
 
 func writeAndSync(f *os.File, data []byte) error {

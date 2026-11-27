@@ -69,4 +69,4 @@
 
 ## Further Notes
 
-[ADR 0001](../adr/0001-separate-exploration-from-delivery.md) 是已接受的决策来源；术语以 [Mulix 术语表](../../GLOSSARY.md) 为准。本规格描述待实现的行为，不宣称仓库已有同一变更的通用修订路径、绑定到内容的审阅结论或合入记录门禁。
+[ADR 0001](../adr/0001-separate-exploration-from-delivery.md) 是已接受的决策来源；术语以 [Mulix 术语表](../GLOSSARY.md) 为准。本规格描述待实现的行为，不宣称仓库已有同一变更的通用修订路径、绑定到内容的审阅结论或合入记录门禁。

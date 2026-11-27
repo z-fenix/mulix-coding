@@ -46,18 +46,19 @@ type SuiteResult struct {
 	EventDigest    string       `yaml:"events_sha256,omitempty" json:"events_sha256,omitempty"`
 }
 type RunRecord struct {
-	ID                string        `yaml:"id" json:"id"`
-	Task              int           `yaml:"task" json:"task"`
-	Stage             string        `yaml:"stage" json:"stage"`
-	Snapshot          Snapshot      `yaml:"snapshot" json:"snapshot"`
-	Started           time.Time     `yaml:"started" json:"started"`
-	Finished          time.Time     `yaml:"finished" json:"finished"`
-	Executor          string        `yaml:"executor" json:"executor"`
-	EnvironmentDigest string        `yaml:"environment_sha256" json:"environment_sha256"`
-	Suites            []SuiteResult `yaml:"suites" json:"suites"`
-	Success           bool          `yaml:"success" json:"success"`
-	Error             string        `yaml:"error,omitempty" json:"error,omitempty"`
-	ReportDigest      string        `yaml:"report_sha256,omitempty" json:"report_sha256,omitempty"`
+	ID                string          `yaml:"id" json:"id"`
+	Task              int             `yaml:"task" json:"task"`
+	Stage             string          `yaml:"stage" json:"stage"`
+	Snapshot          Snapshot        `yaml:"snapshot" json:"snapshot"`
+	Started           time.Time       `yaml:"started" json:"started"`
+	Finished          time.Time       `yaml:"finished" json:"finished"`
+	Executor          string          `yaml:"executor" json:"executor"`
+	EnvironmentDigest string          `yaml:"environment_sha256" json:"environment_sha256"`
+	Suites            []SuiteResult   `yaml:"suites" json:"suites"`
+	Success           bool            `yaml:"success" json:"success"`
+	Error             string          `yaml:"error,omitempty" json:"error,omitempty"`
+	ReportDigest      string          `yaml:"report_sha256,omitempty" json:"report_sha256,omitempty"`
+	ArtifactInputs    []ArtifactInput `yaml:"artifact_inputs,omitempty" json:"artifact_inputs,omitempty"`
 }
 
 const outputLimit = 16 << 20
@@ -311,6 +312,10 @@ func validateStage(c Contract, task int, stage string) error {
 	return nil
 }
 func ValidateMapping(c Contract, p Policy) error {
+	return validateMapping(c, p, c.native != nil)
+}
+
+func validateMapping(c Contract, p Policy, native bool) error {
 	known := map[string]string{}
 	karate := false
 	for _, s := range p.Suites {
@@ -328,6 +333,12 @@ func ValidateMapping(c Contract, p Policy) error {
 		runtimeInput := strings.HasPrefix(strings.ToLower(tc.File), layout.RuntimeDir+"/")
 		if (format == KarateFormat) != runtimeInput || (tc.Task == 0 && format != KarateFormat) {
 			return fmt.Errorf("case %s: change-owned runtime test files are only valid in a Karate suite", tc.ID)
+		}
+		if native && format == "go-json" {
+			pkg, test, ok := strings.Cut(tc.Test, "#")
+			if !ok || pkg == "" || strings.ContainsAny(pkg, " \t\r\n") || strings.TrimSpace(test) == "" || strings.TrimSpace(test) != test {
+				return fmt.Errorf("case %s must use the exact Package#Test identity emitted by go test", tc.ID)
+			}
 		}
 	}
 	return nil
@@ -423,19 +434,26 @@ func Run(ctx context.Context, p Project, c Contract, policy Policy, task int, st
 	if err = validateStage(c, task, stage); err != nil {
 		return record, err
 	}
-	actualPolicy, e := LoadPolicy(p.Root)
+	actualPolicy, e := executionPolicy(p, c)
 	if e != nil {
 		return record, e
 	}
 	if !reflect.DeepEqual(actualPolicy, policy) {
+		if p.TasksDir != "" {
+			return record, fmt.Errorf("execution policy does not match the accepted native contract policy")
+		}
 		return record, fmt.Errorf("execution policy does not match .mulix/quality.yaml")
 	}
+	policy = actualPolicy
 	if err = ValidateMapping(c, policy); err != nil {
 		return record, err
 	}
 	record.Snapshot, err = ExecutionFingerprint(p, c, task)
 	if err != nil {
 		return record, err
+	}
+	if c.native != nil {
+		record.ArtifactInputs = slices.Clone(c.native.inputs)
 	}
 	selected := map[string]bool{}
 	for _, tc := range c.SelectedCases(task) {

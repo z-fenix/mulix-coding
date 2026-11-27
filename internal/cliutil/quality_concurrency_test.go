@@ -2,13 +2,16 @@ package cliutil
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/z-fenix/mulix-coding/internal/flow"
+	"github.com/z-fenix/mulix-coding/internal/lockfile"
 	"github.com/z-fenix/mulix-coding/internal/quality"
 	"github.com/z-fenix/mulix-coding/internal/state"
 	"gopkg.in/yaml.v3"
@@ -119,5 +122,66 @@ func TestQualityCLIInterruptedOrChangedExecutionNeverLeavesPass(t *testing.T) {
 				t.Fatal("old execution overwrote newer attempt")
 			}
 		})
+	}
+}
+
+// TestQualityReceiptRetryChild asks for the same state mutation a retry uses
+// before running its suites. The parent is waiting for this subprocess inside
+// fingerprinting, so a held read lock cannot be released until the probe exits.
+func TestQualityReceiptRetryChild(t *testing.T) {
+	root := os.Getenv("MULIX_RECEIPT_FIXTURE_ROOT")
+	if root == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	_, err := state.Update(ctx, root, "issue", func(s *flow.State) error {
+		replaceRun(s, quality.RunRecord{ID: "pending-retry", Task: 1, Stage: "check", Error: "execution started but has not completed"})
+		return nil
+	}, nil)
+	result := "retry started"
+	if errors.Is(err, lockfile.ErrTimeout) {
+		result = "retry blocked"
+	} else if err != nil {
+		result = err.Error()
+	}
+	if err := os.WriteFile(os.Getenv("MULIX_RECEIPT_PROBE_RESULT"), []byte(result), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestIssueTaskReceiptChecksUnderChangeLock(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Git probe uses a POSIX executable wrapper")
+	}
+	root := chdirTemp(t)
+	s := setupSingleIssueCheck(t, root)
+	qualityCommand(t, "test", "run", "--task", "1", "--stage", "check")
+	run := latestIssueCheck(t, root, s)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	probes := t.TempDir()
+	result := filepath.Join(probes, "result")
+	git := filepath.Join(probes, "git")
+	if err := os.WriteFile(git, []byte(`#!/bin/sh
+[ "$3" = rev-parse ] && [ "$4" = --is-inside-work-tree ] || exit 1
+"$MULIX_RECEIPT_TEST_BINARY" -test.run='^TestQualityReceiptRetryChild$' > /dev/null || exit 2
+printf 'false\n'
+`), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MULIX_RECEIPT_FIXTURE_ROOT", root)
+	t.Setenv("MULIX_RECEIPT_TEST_BINARY", exe)
+	t.Setenv("MULIX_RECEIPT_PROBE_RESULT", result)
+	t.Setenv("PATH", probes+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out := qualityCommand(t, "test", "receipt", "--task", "1")
+	status, err := os.ReadFile(result)
+	if err != nil || string(status) != "retry blocked" {
+		t.Fatalf("receipt returned with status %q (%v): %s", status, err, out)
+	}
+	if out != "Task 1: current check receipt "+run.ID+"\n" {
+		t.Fatalf("unexpected receipt output: %q", out)
 	}
 }

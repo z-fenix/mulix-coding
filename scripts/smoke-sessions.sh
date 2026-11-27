@@ -19,7 +19,7 @@ mulix() { "$bin" "$@"; }
 mkdir "$work/project"
 cd "$work/project"
 git init -q
-mulix init >/dev/null
+mulix _setup --host claude --tracker markdown >/dev/null
 mulix context mode session >/dev/null
 mulix new "Global context" --global >/dev/null
 mulix new "Session A" --session-id session-A >/dev/null

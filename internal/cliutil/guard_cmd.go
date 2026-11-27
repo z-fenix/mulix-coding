@@ -12,7 +12,7 @@ import (
 func newGuardCmd() *cobra.Command {
 	var change string
 	cmd := &cobra.Command{Use: "guard <event>", Short: "Read-only guard checks without transitioning state", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		store, r, err := resolveCommandContext(cmd, change, sessionctx.Inspect)
+		store, r, err := resolveCommandContext(cmd, change, sessionctx.InspectReadOnly)
 		if err != nil {
 			return err
 		}
@@ -24,7 +24,17 @@ func newGuardCmd() *cobra.Command {
 		if _, ok := flow.Find(s.Phase, event); !ok {
 			return fmt.Errorf("event %q is not legal from phase %q", event, s.Phase)
 		}
+		verified, err := checkTrackerSync(cmd.Context(), store.Root(), s, event)
+		if err != nil {
+			return fmt.Errorf("tracker sync for %s: %w", event, err)
+		}
+		if err := recheckTrackerInputs(store.Root(), s, verified); err != nil {
+			return fmt.Errorf("tracker sync for %s: %w", event, err)
+		}
 		report := guard.Run(store.Root(), s, event)
+		if err := recheckTrackerInputs(store.Root(), s, verified); err != nil {
+			return fmt.Errorf("tracker sync for %s: %w", event, err)
+		}
 		printContextSummary(r)
 		printGuardReport(report)
 		if !report.Passed() {
