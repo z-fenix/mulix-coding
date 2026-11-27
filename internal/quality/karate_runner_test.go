@@ -36,8 +36,9 @@ func karateProcessFixture(args []string) int {
 			}
 		}
 	}
-	cwd, _ := os.Getwd()
-	if out == "" || work == "" || filepath.Clean(cwd) != filepath.Clean(work) || len(entries) != 1 || !filepath.IsAbs(entries[0]) || os.Getenv("JAVA_TOOL_OPTIONS") != "" || os.Getenv("KARATE_OPTIONS") != "" {
+	cwd, cwdErr := os.Stat(".")
+	requested, workErr := os.Stat(work)
+	if out == "" || cwdErr != nil || workErr != nil || !os.SameFile(cwd, requested) || len(entries) != 1 || !filepath.IsAbs(entries[0]) || os.Getenv("JAVA_TOOL_OPTIONS") != "" || os.Getenv("KARATE_OPTIONS") != "" {
 		return 2
 	}
 	if log := os.Getenv("KARATE_LOG_FILE"); !filepath.IsAbs(log) || os.WriteFile(log, []byte("rolling fixture log\n"), 0600) != nil {
@@ -156,6 +157,30 @@ func setKarateProcessFixture(t *testing.T, p Project) string {
 	t.Setenv("JAVA_TOOL_OPTIONS", "forbidden")
 	t.Setenv("KARATE_OPTIONS", "--dryrun")
 	return jar
+}
+
+func TestRunKarateAcceptsPhysicalScratchDirectoryAlias(t *testing.T) {
+	p := karateFixture(t)
+	setKarateProcessFixture(t, p)
+	put(t, p.Root, karateA, "pass")
+	c, err := LoadContract(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := LoadPolicy(p.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reproduce Darwin's /var to /private/var spelling difference on any
+	// native host. Java's -w and the child cwd still denote the same directory.
+	alias := filepath.Join(t.TempDir(), "linked scratch")
+	if err := os.Symlink(t.TempDir(), alias); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Run(t.Context(), p, c, policy, 1, "green", alias)
+	if err != nil || !result.Success {
+		t.Fatalf("physical scratch alias lost the scenario result: %v", err)
+	}
 }
 
 func TestRunKarateValidatesStructuredScenarioEvidence(t *testing.T) {

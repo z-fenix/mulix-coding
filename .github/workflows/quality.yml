@@ -98,6 +98,16 @@ jobs:
           path: ${{ runner.temp }}/mulix-bundle-input
       - name: Required native tests and exact final artifact lifecycle
         run: |
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            # Reuse the Git Bash executing this step, not the WSL stub that
+            # unqualified Windows child processes can resolve first.
+            git_bash=$(cygpath -au "$BASH")
+            export MULIX_NATIVE_BASH=$(cygpath -am "$git_bash")
+            if [[ "${MULIX_NATIVE_BASH,,}" != *.exe ]]; then
+              export MULIX_NATIVE_BASH="${MULIX_NATIVE_BASH}.exe"
+            fi
+            export PATH="${git_bash%/*}:$PATH"
+          fi
           if [[ "$QUALITY_BASE" =~ ^0+$ ]]; then
             QUALITY_BASE=ccca3222f05e5732f7c5a602e0384ac35c444f2f
           fi

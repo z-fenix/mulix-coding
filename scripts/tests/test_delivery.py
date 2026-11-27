@@ -16,6 +16,9 @@ import unittest
 from unittest import mock
 
 SCRIPTS = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SCRIPTS))
+from quality_run import native_bash
+
 ROOT = SCRIPTS.parent
 TARGETS = {"linux_amd64", "linux_arm64", "darwin_amd64", "darwin_arm64", "windows_amd64", "windows_arm64"}
 
@@ -28,7 +31,7 @@ class ReleaseSafetyTest(unittest.TestCase):
     def test_shell_wrappers_support_basename_invocation(self):
         for name, args in (("install.sh", ["--help"]), ("release.sh", ["--dry-run", "--version", "p1-basename"])):
             with self.subTest(script=name):
-                result = subprocess.run(["bash", name, *args], cwd=SCRIPTS, env=dict(os.environ, PYTHON=sys.executable), capture_output=True, text=True, timeout=30)
+                result = subprocess.run([native_bash(), name, *args], cwd=SCRIPTS, env=dict(os.environ, PYTHON=sys.executable), capture_output=True, text=True, timeout=30)
                 self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_failed_release_never_removes_existing_dist(self):
@@ -41,7 +44,7 @@ class ReleaseSafetyTest(unittest.TestCase):
             (root / "dist").mkdir()
             sentinel = root / "dist" / "user-owned.txt"
             sentinel.write_bytes(b"preserve-existing-builds")
-            result = subprocess.run(["bash", (root / "scripts/release.sh").as_posix()], env=dict(os.environ, MULIX_VERSION="p1-safety"), capture_output=True, timeout=60)
+            result = subprocess.run([native_bash(), (root / "scripts/release.sh").as_posix()], env=dict(os.environ, MULIX_VERSION="p1-safety"), capture_output=True, timeout=60)
             self.assertNotEqual(result.returncode, 0, "private incomplete source cannot produce a release")
             self.assertTrue(sentinel.exists(), "failed release deleted the pre-existing dist tree")
             self.assertEqual(sentinel.read_bytes(), b"preserve-existing-builds")
@@ -54,7 +57,7 @@ class ReleaseSafetyTest(unittest.TestCase):
             for name in ("install.sh", "delivery.py", "quality_policy.py", "quality_process.py", "quality-policy.json"):
                 if (SCRIPTS / name).exists():
                     (scripts / name).write_bytes((SCRIPTS / name).read_bytes().replace(b"\r\n", b"\n"))
-            entry = ["bash", (scripts / "install.sh").as_posix()]
+            entry = [native_bash(), (scripts / "install.sh").as_posix()]
             healthy = subprocess.run([*entry, "--help"], capture_output=True, timeout=30)
             self.assertEqual(healthy.returncode, 0, healthy.stderr)
             prefix = root / "prefix"
@@ -244,7 +247,7 @@ class DeliveryBundleTest(unittest.TestCase):
 
     def test_release_dry_run_and_unknown_option_have_safe_effects(self):
         out = self.case / "dry"
-        args = ["bash", (SCRIPTS / "release.sh").as_posix(), "--dry-run", "--output", str(out)]
+        args = [native_bash(), (SCRIPTS / "release.sh").as_posix(), "--dry-run", "--output", str(out)]
         env = dict(os.environ, MULIX_VERSION="p1-dry")
         result = subprocess.run(args, cwd=ROOT, env=env, capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -272,7 +275,7 @@ class DeliveryBundleTest(unittest.TestCase):
         empty_path = self.case / "empty-path"
         empty_path.mkdir()
         env = dict(os.environ, PATH=str(empty_path), PYTHON=sys.executable)
-        result = subprocess.run([shutil.which("bash"), (SCRIPTS / "install.sh").as_posix(), "--bundle", str(self.bundle), "--prefix", str(prefix)], env=env, capture_output=True, text=True, timeout=60)
+        result = subprocess.run([native_bash(), (SCRIPTS / "install.sh").as_posix(), "--bundle", str(self.bundle), "--prefix", str(prefix)], env=env, capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         binary = prefix / ("mulix.exe" if os.name == "nt" else "mulix")
         result = subprocess.run([str(binary), "version"], env=env, capture_output=True, text=True, timeout=10)
@@ -355,7 +358,7 @@ d.install_bundle(Path(sys.argv[2]), Path(sys.argv[3]))
 
     def test_source_install_remains_available_with_explicit_version(self):
         prefix = self.case / "source-prefix"
-        result = subprocess.run(["bash", (SCRIPTS / "install.sh").as_posix(), "--source", str(ROOT), "--prefix", str(prefix), "--version", "p1-source-unit"], capture_output=True, text=True, timeout=120)
+        result = subprocess.run([native_bash(), (SCRIPTS / "install.sh").as_posix(), "--source", str(ROOT), "--prefix", str(prefix), "--version", "p1-source-unit"], capture_output=True, text=True, timeout=120)
         self.assertEqual(result.returncode, 0, result.stderr)
         binary = prefix / ("mulix.exe" if os.name == "nt" else "mulix")
         self.assertEqual(subprocess.check_output([str(binary), "version"], text=True), "mulix p1-source-unit\n")

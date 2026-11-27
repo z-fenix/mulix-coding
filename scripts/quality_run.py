@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -12,6 +13,19 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from quality_policy import GateError, require
 from quality_process import run as run_process
+
+
+def native_bash(env=None):
+    env = os.environ if env is None else env
+    pinned = env.get("MULIX_NATIVE_BASH")
+    if pinned is not None:
+        executable = Path(pinned)
+        require(executable.is_absolute() and executable.is_file(), "MULIX_NATIVE_BASH must name an existing absolute executable")
+        return str(executable)
+    found = shutil.which("bash", path=env.get("PATH", os.defpath))
+    require(found is not None, "required tool unavailable: bash")
+    # Pass an absolute path so CreateProcess cannot prefer the WSL shim.
+    return str(Path(found).absolute())
 
 
 def reject_race_logs(directory):
@@ -32,13 +46,16 @@ class Runner:
         require(re.fullmatch(r"[A-Za-z0-9_-]+", name), "invalid command label")
         require(not any(r["name"] == name for r in self.records), "duplicate command label")
         argv = [str(a) for a in argv]
+        env = self.env if env is None else env
+        if argv and argv[0] == "bash":
+            argv[0] = native_bash(env)
         stdout, stderr = self.output / (name + ".stdout.log"), self.output / (name + ".stderr.log")
         record = {"name": name, "argv": argv, "cwd": str(cwd or self.cwd), "started_at": datetime.now(timezone.utc).isoformat(), "expected_exit": expected, "exit_code": None, "timed_out": False, "status": "FAIL", "stdout": stdout.name, "stderr": stderr.name}
         start = time.monotonic()
         with stdout.open("xb") as out, stderr.open("xb") as err:
             try:
                 try:
-                    result = run_process(argv, cwd=cwd or self.cwd, env=self.env if env is None else env, stdout=out, stderr=err, timeout=timeout)
+                    result = run_process(argv, cwd=cwd or self.cwd, env=env, stdout=out, stderr=err, timeout=timeout)
                     record["exit_code"] = result.returncode
                 except subprocess.TimeoutExpired as error:
                     record["timed_out"] = True

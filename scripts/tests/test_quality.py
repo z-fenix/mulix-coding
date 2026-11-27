@@ -142,6 +142,20 @@ class LoggedRunnerTest(unittest.TestCase):
             self.assertEqual([r["exit_code"] for r in records], [0, 7])
             self.assertEqual(records[1]["status"], "FAIL")
 
+    def test_explicit_native_bash_is_executed_and_recorded(self):
+        import os
+        import sys
+        with tempfile.TemporaryDirectory() as d:
+            # Python is a portable sentinel for dispatch, not evidence that
+            # the Windows host's real Bash has been qualified.
+            executable = Path(sys.executable).resolve()
+            runner = self.r.Runner(Path(d) / "logs", Path(d), dict(os.environ, MULIX_NATIVE_BASH=str(executable)))
+            result = runner.run("pinned", ["bash", "-I", "-c", "print('pinned interpreter')"])
+            self.assertEqual(result.stdout, "pinned interpreter\n")
+            self.assertEqual(runner.records[0]["argv"][0], str(executable))
+            with self.assertRaisesRegex(self.r.GateError, "absolute"):
+                runner.run("relative", ["bash", "--version"], env=dict(os.environ, MULIX_NATIVE_BASH="relative/bash"))
+
     def test_utf8_logs_are_preserved_under_a_non_utf8_parent_locale(self):
         import os
         import subprocess
