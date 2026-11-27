@@ -65,7 +65,13 @@ def check_stability(before, after, bundle_before, bundle_after):
 
 def native_env(target):
     os_name, arch = target.split("_")
-    return dict(os.environ, GOOS=os_name, GOARCH=arch, GOFLAGS="", GOENV="off", GOWORK="off", GOTOOLCHAIN="local", CGO_ENABLED="1" if os_name == "linux" else "0", PYTHON=sys.executable)
+    env = dict(os.environ, GOOS=os_name, GOARCH=arch, GOFLAGS="", GOENV="off", GOWORK="off", GOTOOLCHAIN="local", CGO_ENABLED="1" if os_name == "linux" else "0", PYTHON=sys.executable)
+    if os_name == "darwin":
+        # Historical test fixtures may compare the spelling of the child cwd
+        # to their scratch argument. Give both candidate and baseline a
+        # physical TMPDIR instead of Darwin's /var or /tmp aliases.
+        env["TMPDIR"] = str(Path(env.get("TMPDIR") or tempfile.gettempdir()).resolve())
+    return env
 
 
 def tools(runner, policy, target):

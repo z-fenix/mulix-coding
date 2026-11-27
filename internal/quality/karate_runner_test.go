@@ -4,11 +4,13 @@ import (
 	"archive/zip"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -175,6 +177,12 @@ func TestRunKarateAcceptsPhysicalScratchDirectoryAlias(t *testing.T) {
 	// native host. Java's -w and the child cwd still denote the same directory.
 	alias := filepath.Join(t.TempDir(), "linked scratch")
 	if err := os.Symlink(t.TempDir(), alias); err != nil {
+		// Standalone Go tests can run without Windows Developer Mode. P1
+		// preflights symlinks and does not allow this capability skip.
+		const privilegeNotHeld = syscall.Errno(1314)
+		if runtime.GOOS == "windows" && errors.Is(err, privilegeNotHeld) {
+			t.Skipf("symbolic link privileges unavailable: %v", err)
+		}
 		t.Fatal(err)
 	}
 	result, err := Run(t.Context(), p, c, policy, 1, "green", alias)

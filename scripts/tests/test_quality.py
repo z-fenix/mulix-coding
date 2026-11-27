@@ -186,6 +186,18 @@ class LoggedRunnerTest(unittest.TestCase):
 
 
 class NativeContextTest(unittest.TestCase):
+    def test_darwin_coverage_baseline_receives_physical_scratch_root(self):
+        import os
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            physical, alias = root / "actual", root / "alias"
+            physical.mkdir()
+            alias.symlink_to(physical, target_is_directory=True)
+            with mock.patch.dict(os.environ, {"TMPDIR": str(alias)}):
+                self.assertEqual(self.n.native_env("darwin_arm64")["TMPDIR"], str(physical.resolve()))
+                self.assertEqual(self.n.native_env("linux_amd64")["TMPDIR"], str(alias))
+
     def setUp(self):
         path = SCRIPTS / "quality.py"
         self.assertTrue(path.is_file(), "native repository qualification is not implemented")
