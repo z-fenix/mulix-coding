@@ -65,7 +65,7 @@ func runSessionStart(ctx context.Context, processCWD, envFile string, payload []
 					if err != nil {
 						text += " Context invalid: " + err.Error() + ". Repair with state select or context unbind for this session; do not fall back."
 					} else {
-						text += fmt.Sprintf(" Current mode=%s change=%s phase=%s source=%s. Run mulix state show before work; this startup snapshot is not a cached change.", r.Mode, r.Change, r.Phase, r.Source)
+						text += fmt.Sprintf(" Current mode=%s change=%s phase=%s source=%s. Invoke mulix-using and recheck selection with mulix context show; this startup snapshot is not a cached change.", r.Mode, r.Change, r.Phase, r.Source)
 					}
 				} else {
 					fmt.Fprintf(diagnostics, "mulix session context: %v\n", err)

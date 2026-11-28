@@ -33,6 +33,12 @@ changes do not need a remote.
 
 ## The workflow
 
+Start with [`mulix-using`](assets/skills/mulix-using/SKILL.md). A throwaway
+exploration stays out of the delivery workflow. When you decide to ship it,
+register a delivery change: reuse prototype source only after a behavioral
+RED on the delivery baseline. A prototype's passing tests and approvals do
+not carry over.
+
 ```
 specify → clarify → design → tasks → build → verify → archive
 ```

@@ -54,8 +54,30 @@ test -f .mulix/templates/issue-task-template.md
 test -x .claude/skills/subagent-driven-development/scripts/sdd-workspace || [ "${OS:-}" = "Windows_NT" ]
 test -f .mulix/.runtime/.gitignore
 
-step new
+step 'explore before registration'
+spike_scratch=$(mulix context show --field scratch-dir)
+if command -v cygpath >/dev/null 2>&1; then spike_scratch=$(cygpath -m "$spike_scratch"); fi
+expect_hook allow "$spike_scratch/spike/demo.go"
+spike="$work/spike"
+mkdir "$spike"
+printf 'module fixture\n\ngo 1.27.0\n' > "$spike/go.mod"
+printf 'package fixture\nfunc Value() int { return 2 }\n' > "$spike/value.go"
+cat > "$work/value_test.go" <<'EOF'
+package fixture
+import "testing"
+func TestValue(t *testing.T) {
+    if Value() != 2 { t.Fatalf("Value = %d; want 2", Value()) }
+}
+EOF
+cp "$work/value_test.go" "$spike/value_test.go"
+(cd "$spike" && go test -count=1 ./...)
+test ! -e .mulix/active
+test -z "$(find .mulix/.runtime -mindepth 1 -maxdepth 1 -type d -print)"
+expect_fail mulix test receipt --task 1
+
+step 'register for delivery'
 mulix new "Add greeting" >/dev/null
+[ "$(phase)" = specify ]
 IFS= read -r c < .mulix/active
 [[ "$c" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-add-greeting$ ]]
 change_dir=".mulix/.runtime/$c"
@@ -108,6 +130,10 @@ expect_hook allow ".mulix/.runtime/$c/specs/2026-01-01-greeting-design.md"
 expect_hook deny ".mulix/.runtime/$c/brainstorm/1-2/content/a.html"
 scratch=$(mulix context show --field scratch-dir)
 if command -v cygpath >/dev/null 2>&1; then scratch=$(cygpath -m "$scratch"); fi
+state_before_spike=$(git hash-object --no-filters "$change_dir/state.yaml")
+expect_hook deny "$scratch/spike/demo.go"
+[ "$(git hash-object --no-filters "$change_dir/state.yaml")" = "$state_before_spike" ]
+[ "$(< .mulix/active)" = "$c" ]
 expect_hook allow "$scratch/brainstorm/session/content/a.html"
 expect_hook deny "$scratch/verification/tests.log"
 expect_hook deny "$plan/01-greeter.md"
@@ -221,22 +247,30 @@ mulix state set execution_method inline >/dev/null
 base=$(git rev-parse HEAD)
 cp "$ws/task-1-brief.md" "$work/brief-before.md"
 printf 'module fixture\n\ngo 1.27.0\n' > go.mod
-printf 'package fixture\nfunc Value() int { return 0 }\n' > value.go
-cat > value_test.go <<'EOF'
-package fixture
-import "testing"
-func TestValue(t *testing.T) {
-    if Value() != 2 { t.Fatalf("Value = %d; want 2", Value()) }
-}
-EOF
-mulix test run --task 1 --stage red >/dev/null
-printf 'package fixture\nfunc Value() int { return 2 }\n' > value.go
+baseline_value="$work/baseline-value.go"
+printf 'package fixture\nfunc Value() int { return 0 }\n' > "$baseline_value"
+cp "$baseline_value" value.go
+cp "$work/value_test.go" value_test.go
 done_script=.claude/skills/executing-plans/scripts/task-done
 expect_fail bash "$done_script" "$plan" 1 "$base" -- true
 expect_fail bash "$done_script" "$plan" 1 "$base" -- mulix test receipt --task 1
 test ! -f "$ws/progress.md"
 cmp "$work/brief-before.md" "$ws/task-1-brief.md"
 grep -q 'lacks runner-generated green' "$ws/task-1-tests.log"
+
+# Negative probe: a passing candidate without a prior RED cannot close a task.
+cp "$spike/value.go" value.go
+mulix test run --task 1 --stage green >/dev/null
+if premature_receipt=$(mulix test receipt --task 1 2>&1); then
+  printf 'FAIL: prematurely promoted source obtained a task receipt\n' >&2
+  exit 1
+fi
+printf '%s\n' "$premature_receipt" | grep -F 'has no actual RED run'
+
+# Restore the fixture baseline, observe its behavior, then reuse only source.
+cp "$baseline_value" value.go
+mulix test run --task 1 --stage red >/dev/null
+cp "$spike/value.go" value.go
 mulix test run --task 1 --stage green >/dev/null
 ledger=$(bash "$scripts/progress-init" "$plan")
 printf '\n### Task 1\n\n- Step 1: verified — observed behavioral RED.\n' >> "$ledger"

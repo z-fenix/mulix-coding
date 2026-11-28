@@ -34,10 +34,8 @@
   - Deployed independently
   - Demonstrated to users independently
 
-  For a small bounded change or a spike (see how the change was
-  classified during specify), a single User Story 1 is often enough —
-  don't invent P2/P3 stories that don't exist just to fill out the
-  template.
+  If one user journey covers the change, a single User Story 1 is enough.
+  Don't invent P2/P3 stories just to fill out the template.
 -->
 
 ### User Story 1 - [Brief Title] (Priority: P1)
