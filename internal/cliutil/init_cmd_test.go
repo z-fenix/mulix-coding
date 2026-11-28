@@ -375,7 +375,7 @@ func TestSetupUnownedGuidanceBlocksBeforeWrites(t *testing.T) {
 func TestSetupStandalone(t *testing.T) {
 	root := t.TempDir()
 	// The setup skill is distributed separately and can be copied before any installation.
-	skill, err := os.ReadFile(filepath.Join("..", "..", "skills", "setup-mulix", "SKILL.md"))
+	skill, err := os.ReadFile(filepath.Join("..", "..", "assets", "skills", "setup-mulix", "SKILL.md"))
 	if err != nil {
 		t.Fatalf("standalone setup skill unavailable: %v", err)
 	}
@@ -432,6 +432,14 @@ func TestSetupStandalone(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
 			t.Errorf("setup did not install %s: %v", rel, err)
 		}
+	}
+	for _, rel := range []string{".dsh/skills/setup-mulix", ".mulix/.installed/.claude/skills/setup-mulix"} {
+		if _, err := os.Lstat(filepath.Join(root, rel)); !os.IsNotExist(err) {
+			t.Errorf("setup skill must not be installed or registered by the bridge: %s: %v", rel, err)
+		}
+	}
+	if got, err := os.ReadFile(standalone); err != nil || string(got) != string(skill) {
+		t.Fatalf("setup changed the manually installed skill: %v", err)
 	}
 	if _, err := runPresetCLI(t, "init", "--dir", t.TempDir()); err == nil {
 		t.Error("legacy init must not be registered")

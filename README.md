@@ -221,7 +221,16 @@ remain valid.
 
 ## Install into a project
 
-Obtain `skills/setup-mulix/` from the source release matching your installed binary. Copy that independent directory to your host's skill discovery directory (for example, `.claude/skills/setup-mulix/` or `.dsh/skills/setup-mulix/`), then invoke `setup-mulix` in the destination project. The skill asks you to choose hosts and a Markdown, GitHub, or GitLab tracker, presents the selection for confirmation, and runs the bundled setup bridge. Remote targets require an explicit hostname and project; an unreachable target is saved as pending only with your explicit approval. Authentication stays with `gh` or `glab`, and setup does not authorize remote writes.
+Obtain [`assets/skills/setup-mulix/`](assets/skills/setup-mulix/) from the
+source release matching your installed binary. This setup skill is not
+installed by the binary. Copy it to your host's skill discovery directory
+(for example, `.claude/skills/setup-mulix/` or `.dsh/skills/setup-mulix/`), then
+invoke `setup-mulix` in the destination project. The skill asks you to choose
+hosts and a Markdown, GitHub, or GitLab tracker, presents the selection for
+confirmation, and runs the bundled setup bridge. Remote targets require an
+explicit hostname and project; an unreachable target is saved as pending only
+with your explicit approval. Authentication stays with `gh` or `glab`, and
+setup does not authorize remote writes.
 
 This writes `.mulix/` (shared constitution, bundled templates, the
 superpowers license/version, `.mulix/.runtime/.gitignore`, and the

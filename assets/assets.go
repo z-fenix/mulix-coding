@@ -1,11 +1,11 @@
-// Package assets embeds mulix's bundled skills and templates into the
-// compiled binary, so `mulix init` works offline (mirroring spec-kit's
-// wheel force-include approach).
+// Package assets embeds Mulix resources for offline project setup and updates.
 package assets
 
 import "embed"
 
-//go:embed skills
+// Skills embeds the phase skills; setup-mulix is distributed separately for bootstrap.
+//
+//go:embed skills/mulix-*
 var Skills embed.FS
 
 //go:embed templates
