@@ -373,12 +373,19 @@ func TestSetupUnownedGuidanceBlocksBeforeWrites(t *testing.T) {
 }
 
 func TestSetupStandalone(t *testing.T) {
-	root := t.TempDir()
 	// The setup skill is distributed separately and can be copied before any installation.
 	skill, err := os.ReadFile(filepath.Join("..", "..", "assets", "skills", "setup-mulix", "SKILL.md"))
 	if err != nil {
 		t.Fatalf("standalone setup skill unavailable: %v", err)
 	}
+	lf := strings.ReplaceAll(string(skill), "\r\n", "\n")
+	t.Run("LF", func(t *testing.T) { testSetupStandalone(t, []byte(lf)) })
+	t.Run("CRLF", func(t *testing.T) { testSetupStandalone(t, []byte(strings.ReplaceAll(lf, "\n", "\r\n"))) })
+}
+
+func testSetupStandalone(t *testing.T, skill []byte) {
+	t.Helper()
+	root := t.TempDir()
 	standalone := filepath.Join(root, ".claude", "skills", "setup-mulix", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(standalone), 0755); err != nil {
 		t.Fatal(err)
@@ -390,7 +397,7 @@ func TestSetupStandalone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	front := strings.SplitN(string(installed), "---", 3)
+	front := strings.SplitN(strings.ReplaceAll(string(installed), "\r\n", "\n"), "---", 3)
 	if len(front) != 3 {
 		t.Fatal("skill frontmatter missing")
 	}

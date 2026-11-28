@@ -295,8 +295,10 @@ cases:
 	plan := "../" + s.TasksDir
 	const ws = runtime + "/sdd/issues"
 	out := ledgerCommand(t, cwd, "bash", sdd+"/sdd-workspace", plan)
-	if filepath.Clean(out) != filepath.Clean(filepath.Join(root, ws)) {
-		t.Fatalf("workspace is not in the effective Mulix root: %s", out)
+	gotDir, gotErr := os.Stat(out)
+	wantDir, wantErr := os.Stat(filepath.Join(root, ws))
+	if gotErr != nil || wantErr != nil || !os.SameFile(gotDir, wantDir) {
+		t.Fatalf("workspace is not in the effective Mulix root: %s (%v; %v)", out, gotErr, wantErr)
 	}
 	if marker := readProjectFile(t, root, ws+"/plan-path"); marker != s.TasksDir+"\n" {
 		t.Fatalf("wrong workspace marker: %q", marker)
@@ -472,6 +474,26 @@ exec bash "$@"`
 		t.Fatal(err)
 	}
 	ledgerCommand(t, root, "bash", scripts+"/sdd-workspace", s.TasksDir)
+}
+
+func TestIssueLayoutWorkspaceUsesPortableMarkerInput(t *testing.T) {
+	root, scripts, s := issueExecutorFixture(t)
+	// Run the real installed helper and comparator. The external command is
+	// given an environment that cannot open Bash's process-substitution paths.
+	portable := `cmp() {
+  for arg in "$@"; do
+    case "$arg" in
+      /dev/fd/*|/proc/*/fd/*) return 2 ;;
+    esac
+  done
+  command cmp "$@"
+}
+export -f cmp
+exec bash "$@"`
+	ledgerCommand(t, root, "bash", "-c", portable, "marker-fixture", scripts+"/sdd-workspace", s.TasksDir)
+	if got := readProjectFile(t, root, ".mulix/.runtime/native/sdd/issues/plan-path"); got != s.TasksDir+"\n" {
+		t.Fatalf("workspace has the wrong ownership marker: %q", got)
+	}
 }
 
 func TestIssueLayoutReviewRefusesLinkedOutput(t *testing.T) {

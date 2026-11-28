@@ -383,6 +383,26 @@ func TestIssueTaskInputUsesSessionAndNestedRoot(t *testing.T) {
 	}
 }
 
+func TestIssueTaskInputAcceptsRelativePlanFromAliasedCWD(t *testing.T) {
+	root := chdirTemp(t)
+	initMulixRoot(t, root)
+	s := setupIssueQualityCLI(t, root, "issue", flow.PhaseBuild)
+	want := issueTaskText(1, "Review from an aliased directory", "code", "TestValue")
+	qualityCLIFile(t, root, s.TasksDir+"/01-value.md", want)
+
+	alias := filepath.Join(t.TempDir(), "project-alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(alias)
+	// On Unix Getwd can return the shell's logical spelling even though the
+	// selected Mulix root was already resolved to its physical location.
+	t.Setenv("PWD", alias)
+	if got := qualityCommand(t, "_task-input", "1", "--plan-path", s.TasksDir); got != want {
+		t.Fatalf("wrong task document through alias: %q", got)
+	}
+}
+
 func setupSingleIssueCheck(t *testing.T, root string) flow.State {
 	t.Helper()
 	initMulixRoot(t, root)
@@ -431,8 +451,12 @@ func TestIssueTaskClosureRequiresLatestReceipt(t *testing.T) {
 	if out, err := runPresetCLI(t, "state", "transition", "build-complete"); err == nil || !strings.Contains(out, "plan-tasks-complete") {
 		t.Fatalf("unversioned native closure accepted: %v\n%s", err, out)
 	}
-	if out := qualityCommand(t, "test", "receipt", "--task", "1", "--id-only"); out != fresh.ID+"\n" {
-		t.Fatalf("receipt ID-only output = %q, want %s", out, fresh.ID)
+	if out := qualityCommand(t, "test", "receipt", "--task", "1", "--plan-path", s.TasksDir, "--id-only"); out != fresh.ID+"\n" {
+		t.Fatalf("receipt for selected plan = %q, want %s", out, fresh.ID)
+	}
+	otherPlan := t.TempDir()
+	if out, err := runPresetCLI(t, "test", "receipt", "--task", "1", "--plan-path", otherPlan, "--id-only"); err == nil || !strings.Contains(err.Error(), "not the current change's task directory") || out != "" {
+		t.Fatalf("receipt request for a foreign plan was not rejected: %q (%v)", out, err)
 	}
 	writeClosure("- Task 1: complete (receipt " + fresh.ID + ")")
 	// Even another successful attempt at the same version needs closure.

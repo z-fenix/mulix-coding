@@ -3,7 +3,6 @@ package hook
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -55,9 +54,6 @@ func TestRuntimeIssueArtifactWritesPerPhase(t *testing.T) {
 }
 
 func TestRuntimeIssueArtifactsRejectSymlinkAliases(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink privileges vary on Windows")
-	}
 	root := t.TempDir()
 	own := filepath.Join(root, ".mulix", ".runtime", "example")
 	if err := os.MkdirAll(filepath.Join(own, "issues"), 0755); err != nil {
@@ -90,9 +86,6 @@ func TestRuntimeIssueArtifactsRejectSymlinkAliases(t *testing.T) {
 }
 
 func TestBuildRejectsDanglingAliasesIntoOtherRuntime(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink privileges vary on Windows")
-	}
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".mulix", ".runtime", "other"), 0755); err != nil {
 		t.Fatal(err)
