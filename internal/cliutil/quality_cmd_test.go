@@ -451,8 +451,12 @@ func TestIssueTaskClosureRequiresLatestReceipt(t *testing.T) {
 	if out, err := runPresetCLI(t, "state", "transition", "build-complete"); err == nil || !strings.Contains(out, "plan-tasks-complete") {
 		t.Fatalf("unversioned native closure accepted: %v\n%s", err, out)
 	}
-	if out := qualityCommand(t, "test", "receipt", "--task", "1", "--id-only"); out != fresh.ID+"\n" {
-		t.Fatalf("receipt ID-only output = %q, want %s", out, fresh.ID)
+	if out := qualityCommand(t, "test", "receipt", "--task", "1", "--plan-path", s.TasksDir, "--id-only"); out != fresh.ID+"\n" {
+		t.Fatalf("receipt for selected plan = %q, want %s", out, fresh.ID)
+	}
+	otherPlan := t.TempDir()
+	if out, err := runPresetCLI(t, "test", "receipt", "--task", "1", "--plan-path", otherPlan, "--id-only"); err == nil || !strings.Contains(err.Error(), "not the current change's task directory") || out != "" {
+		t.Fatalf("receipt request for a foreign plan was not rejected: %q (%v)", out, err)
 	}
 	writeClosure("- Task 1: complete (receipt " + fresh.ID + ")")
 	// Even another successful attempt at the same version needs closure.
