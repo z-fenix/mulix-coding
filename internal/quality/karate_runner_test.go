@@ -14,9 +14,12 @@ import (
 	"testing"
 )
 
-// Use this test binary as a portable process fixture. The real-JAR smoke
-// test separately checks the contract against the specified distribution.
+// Use this test binary for portable Git and Karate process fixtures. The
+// real-JAR smoke test verifies the actual distribution separately.
 func TestMain(m *testing.M) {
+	if replacement := os.Getenv("MULIX_POLICY_PROBE"); replacement != "" {
+		os.Exit(policySnapshotGitProbe(os.Args[1:], replacement))
+	}
 	if len(os.Args) > 1 && strings.HasPrefix(os.Args[1], "-Duser.home=") {
 		os.Exit(karateProcessFixture(os.Args[1:]))
 	}

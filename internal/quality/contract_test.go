@@ -223,9 +223,41 @@ func TestFingerprintRejectsMissingOrLinkedTestInput(t *testing.T) {
 	}
 }
 
+// Mutate the fixture's on-disk policy at the Git boundary, after the
+// fingerprint has validated its live inputs but before sourcing test data.
+func policySnapshotGitProbe(args []string, replacement string) int {
+	if len(args) != 4 || args[0] != "-C" || args[2] != "rev-parse" || args[3] != "--is-inside-work-tree" {
+		return 2
+	}
+	data, err := os.ReadFile(replacement)
+	if err != nil {
+		return 2
+	}
+	if err := os.WriteFile(filepath.Join(args[1], PolicyPath), data, 0600); err != nil {
+		return 2
+	}
+	if _, err := os.Stdout.WriteString("false\n"); err != nil {
+		return 2
+	}
+	return 0
+}
+
 func TestIssueTaskPolicySnapshot(t *testing.T) {
+	probe := t.TempDir()
+	git := filepath.Join(probe, "git")
 	if runtime.GOOS == "windows" {
-		t.Skip("Git probe uses a POSIX executable wrapper")
+		git += ".exe"
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(git, binary, 0700); err != nil {
+		t.Fatal(err)
 	}
 	p := Project{Root: t.TempDir(), Change: "001-x", SpecPath: ".mulix/.runtime/001-x/spec.md", TasksDir: ".mulix/.runtime/001-x/issues"}
 	put(t, p.Root, p.SpecPath, specFixture)
@@ -256,19 +288,13 @@ func TestIssueTaskPolicySnapshot(t *testing.T) {
 				put(t, p.Root, karateFinal, "Feature: Probe\n")
 				t.Setenv("MULIX_KARATE_JAR", "")
 			}
-			probe := t.TempDir()
-			put(t, probe, "replacement.yaml", alternate)
-			// sourcePaths invokes Git after it validates the live contract,
-			// before choosing test sources or tooling. Switch policy exactly
-			// at that boundary, with no racing file loop or clock guesses.
-			if err := os.WriteFile(filepath.Join(probe, "git"), []byte(`#!/bin/sh
-[ "$3" = rev-parse ] && [ "$4" = --is-inside-work-tree ] || exit 1
-cp "$MULIX_POLICY_PROBE" "$2/.mulix/quality.yaml" || exit 2
-printf 'false\n'
-`), 0700); err != nil {
+			// Switch at the subprocess boundary, with no racing file loop or
+			// timing guesses. The replacement stays outside the project.
+			replacement := filepath.Join(t.TempDir(), "replacement.yaml")
+			if err := os.WriteFile(replacement, []byte(alternate), 0600); err != nil {
 				t.Fatal(err)
 			}
-			t.Setenv("MULIX_POLICY_PROBE", filepath.Join(probe, "replacement.yaml"))
+			t.Setenv("MULIX_POLICY_PROBE", replacement)
 			t.Setenv("PATH", probe+string(os.PathListSeparator)+os.Getenv("PATH"))
 			got, err := tc.read(p, accepted, 0)
 			if written, readErr := ReadProjectFile(p.Root, PolicyPath); readErr != nil || string(written) != alternate {

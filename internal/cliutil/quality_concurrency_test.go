@@ -125,17 +125,22 @@ func TestQualityCLIInterruptedOrChangedExecutionNeverLeavesPass(t *testing.T) {
 	}
 }
 
-// TestQualityReceiptRetryChild asks for the same state mutation a retry uses
-// before running its suites. The parent is waiting for this subprocess inside
-// fingerprinting, so a held read lock cannot be released until the probe exits.
-func TestQualityReceiptRetryChild(t *testing.T) {
-	root := os.Getenv("MULIX_RECEIPT_FIXTURE_ROOT")
-	if root == "" {
-		return
+// The portably named Git subprocess asks for the same state mutation a
+// retry uses. The receipt command waits for it while holding the read lock.
+func TestMain(m *testing.M) {
+	if result := os.Getenv("MULIX_RECEIPT_PROBE_RESULT"); result != "" {
+		os.Exit(receiptRetryGitProbe(os.Args[1:], result))
+	}
+	os.Exit(m.Run())
+}
+
+func receiptRetryGitProbe(args []string, resultPath string) int {
+	if len(args) != 4 || args[0] != "-C" || args[2] != "rev-parse" || args[3] != "--is-inside-work-tree" {
+		return 2
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
-	_, err := state.Update(ctx, root, "issue", func(s *flow.State) error {
+	_, err := state.Update(ctx, args[1], "issue", func(s *flow.State) error {
 		replaceRun(s, quality.RunRecord{ID: "pending-retry", Task: 1, Stage: "check", Error: "execution started but has not completed"})
 		return nil
 	}, nil)
@@ -145,15 +150,15 @@ func TestQualityReceiptRetryChild(t *testing.T) {
 	} else if err != nil {
 		result = err.Error()
 	}
-	if err := os.WriteFile(os.Getenv("MULIX_RECEIPT_PROBE_RESULT"), []byte(result), 0600); err != nil {
-		t.Fatal(err)
+	if err := os.WriteFile(resultPath, []byte(result), 0600); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
 	}
+	fmt.Println("false")
+	return 0
 }
 
 func TestIssueTaskReceiptChecksUnderChangeLock(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Git probe uses a POSIX executable wrapper")
-	}
 	root := chdirTemp(t)
 	s := setupSingleIssueCheck(t, root)
 	qualityCommand(t, "test", "run", "--task", "1", "--stage", "check")
@@ -165,15 +170,16 @@ func TestIssueTaskReceiptChecksUnderChangeLock(t *testing.T) {
 	probes := t.TempDir()
 	result := filepath.Join(probes, "result")
 	git := filepath.Join(probes, "git")
-	if err := os.WriteFile(git, []byte(`#!/bin/sh
-[ "$3" = rev-parse ] && [ "$4" = --is-inside-work-tree ] || exit 1
-"$MULIX_RECEIPT_TEST_BINARY" -test.run='^TestQualityReceiptRetryChild$' > /dev/null || exit 2
-printf 'false\n'
-`), 0700); err != nil {
+	if runtime.GOOS == "windows" {
+		git += ".exe"
+	}
+	binary, err := os.ReadFile(exe)
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("MULIX_RECEIPT_FIXTURE_ROOT", root)
-	t.Setenv("MULIX_RECEIPT_TEST_BINARY", exe)
+	if err := os.WriteFile(git, binary, 0700); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("MULIX_RECEIPT_PROBE_RESULT", result)
 	t.Setenv("PATH", probes+string(os.PathListSeparator)+os.Getenv("PATH"))
 	out := qualityCommand(t, "test", "receipt", "--task", "1")

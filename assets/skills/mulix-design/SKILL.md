@@ -5,6 +5,10 @@ description: Use when the active change is in the design phase, before any plan 
 
 # Design phase
 
+Use this phase for design work on the selected delivery change only. For
+an unrelated request or throwaway exploration, return to `mulix-using` to
+route it before invoking a design skill. A spike is not a design track.
+
 **REQUIRED SUB-SKILL:** invoke `brainstorming` now and follow it
 exactly. This skill only adds what mulix needs around it: where its
 output goes, which path applies, and how the phase ends.
@@ -42,9 +46,6 @@ mulix state set design_track bounded        # or: architectural
   builder check (a fresh subagent reads it as the builder and at most one
   round of questions comes back), and the human's review of the written
   file.
-- **spike** does not apply here: the change already has a spec, so its
-  output is code that ships. If the human really only wants an answer to a
-  feasibility question, say so and stop — that's not a mulix change.
 
 When in doubt, take architectural. The ratchet is one-way: hidden
 complexity found mid-design upgrades bounded → architectural (record the
@@ -53,10 +54,11 @@ new track), never the reverse.
 ## Where things go
 
 - Design doc: `.mulix/.runtime/<change>/specs/` (architectural only).
-- Visual companion: pass the project root as `--project-dir`; the launcher
-  queries `mulix context show --field scratch-dir` and puts private sessions in
-  its `brainstorm/` directory. Save the returned screen/state paths; these are
-  temporary materials, not archived runtime output.
+- Visual companion: pass the project root as `--project-dir` and carry the
+  identity as described in `mulix-using`'s session context rules. The
+  launcher queries `mulix context show --field scratch-dir` and puts private
+  sessions in its `brainstorm/` directory. Save the returned screen/state
+  paths; these are temporary materials, not archived runtime output.
 - Keep agent-authored design documents and companion files in their respective
   paths. Claude Code's hook checks `Write`/`Edit`, with mode-specific error
   handling described in `mulix-using`; Bash, MCP and other writers are not

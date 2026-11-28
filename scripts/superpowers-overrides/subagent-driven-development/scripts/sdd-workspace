@@ -99,11 +99,12 @@ if [ "$artifact_mode" = native ]; then
   fi
   mkdir -p -- "$base"
   dir="$base/${approved##*/}"
-  if mkdir -m 700 -- "$dir" 2>/dev/null; then
+  if (umask 077; mkdir -- "$dir") 2>/dev/null; then
     printf '%s\n' "$plan_id" > "$dir/plan-path"
   fi
+  # Use stdin rather than a Bash pseudo-file; the marker must still match byte for byte.
   if [ -L "$dir" ] || [ -L "$dir/plan-path" ] || [ ! -f "$dir/plan-path" ] ||
-    ! cmp -s "$dir/plan-path" <(printf '%s\n' "$plan_id"); then
+    ! printf '%s\n' "$plan_id" | cmp -s "$dir/plan-path" -; then
     printf 'sdd-workspace: existing workspace is not bound to %s\n' "$plan_id" >&2
     exit 2
   fi

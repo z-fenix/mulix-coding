@@ -1,9 +1,38 @@
 ---
 name: mulix-using
-description: Use at the start of any session in a mulix-managed project, and whenever about to write or edit a file, to check which phase gates apply right now.
+description: Use when starting a session, exploring a throwaway prototype, resuming a change, or about to write in a mulix-managed project.
 ---
 
 # Using mulix
+
+## Route the request before registering
+
+Run `mulix context show` with the current session identity. A successful
+result with an empty `change` is a valid no-change context. A resolution
+error is not an empty context; stay read-only until it is resolved.
+
+- **Exploration (spike):** The user wants to learn or try something out,
+  not deliver it yet. Read-only investigation needs no workspace. For an
+  authorized runnable prototype, require a valid no-change context. If a
+  change is selected, keep that context read-only. Open a separately
+  authorized, isolated workspace in the host and recheck `mulix context show`
+  there before writing; changing the shell directory alone doesn't change
+  the hook's context. In the no-change workspace, resolve `scratch-dir`,
+  create that directory privately if absent, and make a fresh private
+  subdirectory for the prototype. Use `brainstorming`'s standalone spike
+  path. Keep delivery files, active/session selections and Issues unchanged.
+  Report the findings and the location of any retained prototype; its test
+  log is not delivery evidence.
+- **Delivery:** The user wants to implement a change for delivery. Resume
+  the intended change or [register a new one](#register-a-delivery-change).
+  Then follow its current phase. An active change does not make an
+  unrelated exploration part of that change.
+
+If intent is unclear and it would determine whether to register a change,
+ask whether this is a throwaway experiment or work to deliver. Do not ask
+again when intent is already clear.
+
+## The delivery workflow
 
 mulix provides a seven-phase workflow with write-tool checks and
 transition evidence guards, backed by agent discipline:
@@ -44,10 +73,11 @@ specify → clarify → design → tasks → build → verify → archive
    a nonempty `--reason` records a recovery bypass, never test qualification,
    and cannot make an illegal event legal or bypass remote sync.
 
-## Resolve the change first
+## Resolve the delivery phase
 
-Run `mulix state show` before choosing the phase skill. Use its phase and
-paths, not conversation history or the project's default tracker:
+For the selected delivery change, run `mulix state show` before choosing a
+phase skill. Use its phase and paths, not conversation history or the
+project's default tracker:
 
 | `artifact_layout` and `tracker` | Artifact and publication rules |
 | --- | --- |
@@ -80,6 +110,10 @@ In **session** mode, use the host-provided identity: `MULIX_SESSION_ID` from
 SessionStart, or explicit `--session-id '<host-id>'` when it is not inherited.
 Explicit identity overrides the environment. No identity means global use;
 an empty/invalid supplied identity is an error, not permission to guess one.
+For bundled helpers that query context themselves (including the visual
+companion), pass the same host identity as `MULIX_SESSION_ID` in the helper's
+environment if SessionStart did not export it. A flag on a previous CLI
+call is not inherited by the helper.
 
 | Source | Next action |
 | --- | --- |
@@ -125,15 +159,23 @@ snapshot; a switch affects the next call, not an already-running process.
   `migrations/` and `_shared/` inside runtime are history, not new destinations.
   Init/update preserve those files and their sensitive-file ignore rules.
 
-## Starting a new change
+## Register a delivery change
 
-`mulix new "<title>"` creates an owned runtime directory and state in
-specify, and selects it for the effective context. With tracker setup,
-it pins that project's tracker and native paths in the new state. In a
-project without tracker setup it creates the legacy docs directories instead.
-Start the change before drafting. IDs use the local date, e.g.
-`2026-10-14-add-login`, with `-2`, `-3` for collisions. Existing changes
-keep their IDs and layouts; select them as-is.
+For new work the user intends to deliver, run `mulix new "<title>"`
+before drafting the delivery spec. It creates an owned runtime directory
+and state in `specify`, and selects it for the effective context. With
+tracker setup it pins the tracker and native paths; otherwise it creates
+the legacy docs directories.
+
+**Promotion** is registering a delivery change after the user decides to
+ship an exploration. Bring the findings into Specify and keep prototype
+files separate. Follow the same seven phases and tracker rules; no
+exploration receipt, approval or passing log is inherited. In Build,
+follow `mulix-build`'s promotion steps before bringing over source.
+The decision to deliver does not authorize commits, pushes or publication.
+
+IDs use the local date, e.g. `2026-10-14-add-login`, with `-2`, `-3` for
+collisions. Existing changes keep their IDs and layouts; select them as-is.
 
 ## Red flags — stop and reconsider
 

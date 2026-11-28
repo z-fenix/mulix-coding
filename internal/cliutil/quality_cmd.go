@@ -111,14 +111,14 @@ func requireNativePlan(p quality.Project, plan string) error {
 	if p.TasksDir == "" {
 		return fmt.Errorf("current change does not use a native task directory")
 	}
-	// Resolve the supplied path from the caller's cwd, never from the Git
-	// root. The canonical plan still goes through ControlPath when read.
-	full, err := filepath.EvalSymlinks(plan)
-	if err == nil && plan != "" {
-		full, err = filepath.Abs(full)
-		if err == nil {
-			rel, err := filepath.Rel(p.Root, full)
-			if err == nil && filepath.ToSlash(rel) == p.TasksDir {
+	// Stat resolves a relative path from the caller's actual cwd. Compare
+	// directory identity so a logical cwd or Windows short name does not
+	// invalidate the same plan. Reads still validate the pinned path.
+	if plan != "" {
+		supplied, err := os.Stat(plan)
+		if err == nil && supplied.IsDir() {
+			pinned, err := os.Stat(filepath.Join(p.Root, filepath.FromSlash(p.TasksDir)))
+			if err == nil && pinned.IsDir() && os.SameFile(supplied, pinned) {
 				return nil
 			}
 		}

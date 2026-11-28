@@ -40,6 +40,23 @@ human's permission; commands and hook context must refer to the same checkout.
    Keep the approved inputs, policy and test stable across the RED/GREEN pair.
    An infrastructure failure is not RED. For a reasoned documentation or
    verification task run `mulix test run --task N --stage check`.
+
+   **Promotion from a spike:** Start from the delivery baseline without the
+   prototype implementation. Derive or review the mapped test against the
+   approved spec and observe its behavioral RED there. Only then apply the
+   prototype source needed for this task, run GREEN, and review the result.
+   A separately built, throwaway prototype is not production code written
+   ahead of its test: it can be reused *after* RED without rewriting it.
+   This promotion rule applies to both executors, ahead of generic TDD
+   cleanup guidance. When dispatching an implementer, pass the prototype
+   location and the RED-before-import rule alongside the task brief.
+   Keep the original prototype outside the delivery workspace; its logs,
+   pass claims and approvals do not count toward closure. If early reuse
+   already made the test pass, preserve the work and agree how to restore
+   the pre-prototype baseline safely. RED and GREEN must run in the same
+   delivery checkout and change. Stop if that baseline cannot be restored;
+   a passing test, an artificial failure, or a CHECK cannot substitute for RED.
+
 3. Record verified step outcomes and command/result evidence in the task's
    `### Task N` ledger section. **Native task files are not progress
    files:** preserve their prose and inputs, including all step markers.
