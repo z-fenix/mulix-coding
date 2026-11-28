@@ -8,13 +8,16 @@ import (
 )
 
 func FuzzAcceptanceBlock(f *testing.F) {
-	for _, seed := range []string{"FR-001", "中文SC-002：验收", "```\n~~~\n\x00"} {
+	for _, seed := range []string{"FR-001", "中文SC-002：验收", "```\n~~~\n\x00", "\t\n", "\xff"} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, payload string) {
-		// Block promises YAML, not arbitrary JSON's wider raw-control alphabet.
-		// Marshal valid YAML independently; choose a fence longer than any payload run.
-		encoded, err := yaml.Marshal(map[string]string{"payload": payload})
+		// Force quoting so yaml.v3 cannot emit a tab-only line as literal
+		// block indentation. SetString still encodes invalid UTF-8 as binary.
+		var value yaml.Node
+		value.SetString(payload)
+		value.Style = yaml.DoubleQuotedStyle
+		encoded, err := yaml.Marshal(map[string]*yaml.Node{"payload": &value})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -27,8 +30,8 @@ func FuzzAcceptanceBlock(f *testing.F) {
 				run = 0
 			}
 		}
-		// Compare extraction against the unfenced YAML document, not the encoder's
-		// input: yaml.v3 itself canonicalizes some empty block scalars.
+		// Compare the fenced extraction with an independent decode of the
+		// exact YAML document.
 		var expected map[string]string
 		if err := yaml.Unmarshal(encoded, &expected); err != nil {
 			t.Fatal(err)
