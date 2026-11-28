@@ -383,6 +383,26 @@ func TestIssueTaskInputUsesSessionAndNestedRoot(t *testing.T) {
 	}
 }
 
+func TestIssueTaskInputAcceptsRelativePlanFromAliasedCWD(t *testing.T) {
+	root := chdirTemp(t)
+	initMulixRoot(t, root)
+	s := setupIssueQualityCLI(t, root, "issue", flow.PhaseBuild)
+	want := issueTaskText(1, "Review from an aliased directory", "code", "TestValue")
+	qualityCLIFile(t, root, s.TasksDir+"/01-value.md", want)
+
+	alias := filepath.Join(t.TempDir(), "project-alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(alias)
+	// On Unix Getwd can return the shell's logical spelling even though the
+	// selected Mulix root was already resolved to its physical location.
+	t.Setenv("PWD", alias)
+	if got := qualityCommand(t, "_task-input", "1", "--plan-path", s.TasksDir); got != want {
+		t.Fatalf("wrong task document through alias: %q", got)
+	}
+}
+
 func setupSingleIssueCheck(t *testing.T, root string) flow.State {
 	t.Helper()
 	initMulixRoot(t, root)
